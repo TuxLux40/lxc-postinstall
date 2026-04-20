@@ -250,9 +250,8 @@ if ui_enabled; then
     fi
 
     if command -v pct &>/dev/null && [[ -d /etc/pve ]]; then
-        local ct_list
         ct_list=$(pct list 2>/dev/null | awk 'NR>1 {printf "  %s  %s  (%s)\n", $1, $4, $2}')
-        local ct_msg="Detected Proxmox host.\n\nAvailable containers:\n${ct_list}\n\nConfigure selected containers now?"
+        ct_msg="Detected Proxmox host.\n\nAvailable containers:\n${ct_list}\n\nConfigure selected containers now?"
         if ui_confirm "Target Mode" "$ct_msg" "Run on current host only"; then
             mapfile -t TARGET_CTIDS < <(ui_select_containers)
             if [[ ${#TARGET_CTIDS[@]} -gt 0 ]]; then
