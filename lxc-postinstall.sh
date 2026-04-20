@@ -10,7 +10,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
 
 # ── CONFIG (env vars override defaults) ──────────────────────────────────────
-TIMEZONE="${TIMEZONE:-Europe/Berlin}"
 TS_AUTHKEY="${TS_AUTHKEY:-}"
 PROXMOX_HOST="${PROXMOX_HOST:-}"
 PROXMOX_USER="${PROXMOX_USER:-root@pam}"
@@ -41,7 +40,7 @@ die() {
     exit 1
 }
 
-TOTAL_STEPS=12
+TOTAL_STEPS=11
 CURRENT_STEP=0
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -161,7 +160,6 @@ run_for_selected_containers() {
     tmp_env=$(mktemp)
 
     cat >"$tmp_env" <<EOF
-TIMEZONE=$TIMEZONE
 TS_AUTHKEY=$TS_AUTHKEY
 PROXMOX_HOST=$PROXMOX_HOST
 PROXMOX_USER=$PROXMOX_USER
@@ -189,7 +187,6 @@ EOF
 
 save_env() {
     cat >"$SCRIPT_DIR/.env" <<EOF
-TIMEZONE=$TIMEZONE
 TS_AUTHKEY=$TS_AUTHKEY
 PROXMOX_HOST=$PROXMOX_HOST
 PROXMOX_USER=$PROXMOX_USER
@@ -200,7 +197,6 @@ EOF
 }
 
 run_interactive_setup() {
-    TIMEZONE=$(ui_input "Timezone" "Enter timezone" "$TIMEZONE")
     TS_AUTHKEY=$(ui_input "Tailscale" "Enter TS_AUTHKEY (leave empty to skip join)" "$TS_AUTHKEY" 1)
     PROXMOX_HOST=$(ui_input "Proxmox" "Enter PROXMOX_HOST" "$PROXMOX_HOST")
     PROXMOX_USER=$(ui_input "Proxmox" "Enter PROXMOX_USER" "$PROXMOX_USER")
@@ -466,13 +462,7 @@ fi
 
 warn "ProxmoxMCP: fill in token at ${PMCP_DIR}/proxmox-config/config.json"
 
-# ── 11. TIMEZONE ──────────────────────────────────────────────────────────────
-step "Timezone → $TIMEZONE"
-timedatectl set-timezone "$TIMEZONE" 2>/dev/null ||
-    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
-info "Timezone set"
-
-# ── 12. BASH ENVIRONMENT ──────────────────────────────────────────────────────
+# ── 11. BASH ENVIRONMENT ──────────────────────────────────────────────────────
 step "Bash environment"
 BASHRC_MARKER_START="# >>> lxc-postinstall >>>"
 BASHRC_CONTENT_PROBE="export EDITOR=micro"
