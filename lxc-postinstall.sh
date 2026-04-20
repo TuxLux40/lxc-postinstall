@@ -111,9 +111,9 @@ ui_input() {
 }
 
 ui_confirm() {
-    local title="$1" prompt="$2"
+    local title="$1" prompt="$2" no_text="${3:-No}"
     if ui_has_whiptail; then
-        whiptail --title "$title" --yesno "$prompt" 12 78
+        whiptail --title "$title" --yesno --no-button "$no_text" "$prompt" 20 78
         return $?
     fi
     local answer
@@ -238,10 +238,22 @@ if ui_enabled; then
         esac
     fi
 
-    run_interactive_setup
+    # Skip interactive prompts if .env already has values, unless user wants to reconfigure
+    if [[ -f "$SCRIPT_DIR/.env" ]] && [[ -s "$SCRIPT_DIR/.env" ]]; then
+        if ui_confirm "Stored Config" "Found existing .env with saved settings.\n\nReconfigure values?" "Keep current values"; then
+            run_interactive_setup
+        else
+            info "Using stored .env values"
+        fi
+    else
+        run_interactive_setup
+    fi
 
     if command -v pct &>/dev/null && [[ -d /etc/pve ]]; then
-        if ui_confirm "Target Mode" "Detected Proxmox host. Configure selected containers now?"; then
+        local ct_list
+        ct_list=$(pct list 2>/dev/null | awk 'NR>1 {printf "  %s  %s  (%s)\n", $1, $4, $2}')
+        local ct_msg="Detected Proxmox host.\n\nAvailable containers:\n${ct_list}\n\nConfigure selected containers now?"
+        if ui_confirm "Target Mode" "$ct_msg" "Run on current host only"; then
             mapfile -t TARGET_CTIDS < <(ui_select_containers)
             if [[ ${#TARGET_CTIDS[@]} -gt 0 ]]; then
                 run_for_selected_containers "${TARGET_CTIDS[@]}"
@@ -266,16 +278,35 @@ fedora) quiet dnf upgrade -y ;;
 esac
 info "System up to date"
 
+# Update other package managers if already installed
+command -v npm &>/dev/null && {
+    quiet npm update -g
+    info "npm globals updated"
+} || true
+command -v uv &>/dev/null && {
+    quiet uv self update
+    info "uv updated"
+} || true
+command -v pip3 &>/dev/null && {
+    quiet pip3 install --upgrade pip 2>/dev/null
+    info "pip updated"
+} || true
+
 # ── 2. BASE PACKAGES ──────────────────────────────────────────────────────────
 step "Installing base packages"
 case "$DISTRO" in
 debian | ubuntu | linuxmint)
     pkg_install \
-        curl wget git micro fish fastfetch \
+        curl wget git micro fish \
         htop btop net-tools dnsutils tree \
         unzip tar ca-certificates gnupg lsb-release \
         build-essential procps \
         trash-cli python3 python3-pip python3-venv
+    # fastfetch: not in default Debian/Ubuntu repos — use PPA
+    if ! command -v fastfetch &>/dev/null; then
+        quiet add-apt-repository -y ppa:zhangsongcui3371/fastfetch 2>/dev/null ||
+            quiet bash -c 'curl -sLo /tmp/ff.deb https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb && dpkg -i /tmp/ff.deb && rm -f /tmp/ff.deb'
+    fi
     ;;
 arch | manjaro)
     pkg_install curl wget git micro fish fastfetch htop btop \
@@ -287,6 +318,40 @@ fedora)
     ;;
 esac
 info "Base packages installed"
+
+# fastfetch config with tailscale module
+mkdir -p /root/.config/fastfetch
+cat >/root/.config/fastfetch/config.jsonc <<'FFEOF'
+{
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "terminal",
+        "cpu",
+        "memory",
+        "disk",
+        "localip",
+        {
+            "type": "command",
+            "key": "Tailscale IP",
+            "text": "tailscale ip -4 2>/dev/null || echo 'not connected'"
+        },
+        {
+            "type": "command",
+            "key": "Tailscale",
+            "text": "tailscale status --self=true 2>/dev/null | head -1 || echo 'not running'"
+        },
+        "break",
+        "colors"
+    ]
+}
+FFEOF
 
 # ── 3. UV (Python package manager) ───────────────────────────────────────────
 step "Python package manager (uv)"
