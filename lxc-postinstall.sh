@@ -2,13 +2,15 @@
 # Post-install script for PVE LXC containers (root)
 set -euo pipefail
 
+# Suppress locale warnings in fresh containers
+export LC_ALL=C
+
 # ── LOAD .env (same dir as script) ───────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
 
 # ── CONFIG (env vars override defaults) ──────────────────────────────────────
 TIMEZONE="${TIMEZONE:-Europe/Berlin}"
-LOCALE="${LOCALE:-de_DE.UTF-8}"
 TS_AUTHKEY="${TS_AUTHKEY:-}"
 PROXMOX_HOST="${PROXMOX_HOST:-}"
 PROXMOX_USER="${PROXMOX_USER:-root@pam}"
@@ -24,12 +26,45 @@ fi
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
-info() { echo -e "${GREEN}[+]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+
+LOGFILE="/var/log/lxc-postinstall.log"
+: >"$LOGFILE"
+
+info() { echo -e "  ${GREEN}✓${NC} $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }
 die() {
-    echo -e "${RED}[✗]${NC} $*" >&2
+    echo -e "  ${RED}✗${NC} $*" >&2
     exit 1
+}
+
+TOTAL_STEPS=12
+CURRENT_STEP=0
+step() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    local pct=$((CURRENT_STEP * 100 / TOTAL_STEPS))
+    local bar_len=30
+    local filled=$((pct * bar_len / 100))
+    local empty=$((bar_len - filled))
+    local bar="${GREEN}"
+    for ((i = 0; i < filled; i++)); do bar+="█"; done
+    bar+="${DIM}"
+    for ((i = 0; i < empty; i++)); do bar+="░"; done
+    bar+="${NC}"
+    echo ""
+    echo -e "  ${BOLD}[${CURRENT_STEP}/${TOTAL_STEPS}]${NC} ${BLUE}$*${NC}  ${bar} ${DIM}${pct}%${NC}"
+}
+
+# Run a command quietly, logging output; show stderr summary on failure
+quiet() {
+    if ! "$@" >>"$LOGFILE" 2>&1; then
+        echo -e "  ${RED}✗ Command failed:${NC} $1"
+        tail -5 "$LOGFILE" | sed 's/^/    /' >&2
+        exit 1
+    fi
 }
 
 NON_INTERACTIVE=0
@@ -127,7 +162,6 @@ run_for_selected_containers() {
 
     cat >"$tmp_env" <<EOF
 TIMEZONE=$TIMEZONE
-LOCALE=$LOCALE
 TS_AUTHKEY=$TS_AUTHKEY
 PROXMOX_HOST=$PROXMOX_HOST
 PROXMOX_USER=$PROXMOX_USER
@@ -156,7 +190,6 @@ EOF
 save_env() {
     cat >"$SCRIPT_DIR/.env" <<EOF
 TIMEZONE=$TIMEZONE
-LOCALE=$LOCALE
 TS_AUTHKEY=$TS_AUTHKEY
 PROXMOX_HOST=$PROXMOX_HOST
 PROXMOX_USER=$PROXMOX_USER
@@ -168,7 +201,6 @@ EOF
 
 run_interactive_setup() {
     TIMEZONE=$(ui_input "Timezone" "Enter timezone" "$TIMEZONE")
-    LOCALE=$(ui_input "Locale" "Enter locale" "$LOCALE")
     TS_AUTHKEY=$(ui_input "Tailscale" "Enter TS_AUTHKEY (leave empty to skip join)" "$TS_AUTHKEY" 1)
     PROXMOX_HOST=$(ui_input "Proxmox" "Enter PROXMOX_HOST" "$PROXMOX_HOST")
     PROXMOX_USER=$(ui_input "Proxmox" "Enter PROXMOX_USER" "$PROXMOX_USER")
@@ -192,9 +224,9 @@ fi
 
 pkg_install() {
     case "$DISTRO" in
-    debian | ubuntu | linuxmint) apt-get install -y "$@" ;;
-    arch | manjaro) pacman -S --noconfirm "$@" ;;
-    fedora) dnf install -y "$@" ;;
+    debian | ubuntu | linuxmint) quiet apt-get install -y "$@" ;;
+    arch | manjaro) quiet pacman -S --noconfirm "$@" ;;
+    fedora) quiet dnf install -y "$@" ;;
     *) die "Unsupported distro: $DISTRO" ;;
     esac
 }
@@ -226,26 +258,27 @@ if ui_enabled; then
 fi
 
 # ── 1. SYSTEM UPDATE ──────────────────────────────────────────────────────────
-info "Updating system packages..."
+step "Updating system packages"
 case "$DISTRO" in
 debian | ubuntu | linuxmint)
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get upgrade -y -o Dpkg::Options::="--force-confold"
+    quiet apt-get update -qq
+    quiet apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
-arch | manjaro) pacman -Syu --noconfirm ;;
-fedora) dnf upgrade -y ;;
+arch | manjaro) quiet pacman -Syu --noconfirm ;;
+fedora) quiet dnf upgrade -y ;;
 esac
+info "System up to date"
 
 # ── 2. BASE PACKAGES ──────────────────────────────────────────────────────────
-info "Installing base packages..."
+step "Installing base packages"
 case "$DISTRO" in
 debian | ubuntu | linuxmint)
     pkg_install \
         curl wget git micro fish fastfetch \
         htop btop net-tools dnsutils tree \
         unzip tar ca-certificates gnupg lsb-release \
-        build-essential procps locales \
+        build-essential procps \
         trash-cli python3 python3-pip python3-venv
     ;;
 arch | manjaro)
@@ -257,55 +290,71 @@ fedora)
         net-tools unzip tar gcc tree trash-cli python3 python3-pip
     ;;
 esac
+info "Base packages installed"
 
 # ── 3. UV (Python package manager) ───────────────────────────────────────────
+step "Python package manager (uv)"
 if ! command -v uv &>/dev/null; then
-    info "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    quiet bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+    info "uv installed"
 else
-    info "uv already present: $(uv --version)"
+    info "uv already present"
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
 # ── 4. NODE.JS (LTS) ──────────────────────────────────────────────────────────
+step "Node.js LTS"
 if ! command -v node &>/dev/null; then
-    info "Installing Node.js LTS..."
     case "$DISTRO" in
     debian | ubuntu | linuxmint)
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-        apt-get install -y nodejs
+        quiet bash -c 'curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -'
+        quiet apt-get install -y nodejs
         ;;
     arch | manjaro) pkg_install nodejs npm ;;
-    fedora) dnf install -y nodejs npm ;;
+    fedora) quiet dnf install -y nodejs npm ;;
     esac
+    info "Node.js $(node -v) installed"
 else
-    info "Node.js already present: $(node -v)"
+    info "Node.js already present"
 fi
 
 # ── 5. TAILSCALE ──────────────────────────────────────────────────────────────
-info "Installing Tailscale..."
-curl -fsSL https://tailscale.com/install.sh | sh
-systemctl enable --now tailscaled
+step "Tailscale"
+quiet bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'
+quiet systemctl enable --now tailscaled || true
+
+# Wait for tailscaled to be ready (up to 10s)
+for i in $(seq 1 20); do
+    tailscale status &>/dev/null && break
+    sleep 0.5
+done
 
 if [[ -n "$TS_AUTHKEY" ]]; then
     if tailscale ip -4 &>/dev/null || tailscale ip -6 &>/dev/null; then
-        info "Already connected to Tailnet, skipping join."
+        info "Already connected to Tailnet"
     else
-        info "Joining Tailnet..."
-        tailscale up --authkey="$TS_AUTHKEY" --accept-routes
+        if tailscale status &>/dev/null; then
+            quiet tailscale up --authkey="$TS_AUTHKEY" --accept-routes
+            info "Joined Tailnet"
+        else
+            warn "tailscaled not running — skipping join"
+        fi
     fi
-    info "Enabling Tailscale SSH..."
-    tailscale set --ssh
+    if tailscale status &>/dev/null; then
+        quiet tailscale set --ssh
+        info "Tailscale SSH enabled"
+    fi
 else
-    warn "Tailscale installed but not joined. Run: tailscale up"
+    warn "Tailscale installed — not joined (no TS_AUTHKEY)"
 fi
 
 # ── 6. NPM GLOBAL PACKAGES ────────────────────────────────────────────────────
-info "Installing npm global packages..."
-npm install -g skill-manager
+step "npm global packages"
+quiet npm install -g skill-manager
+info "skill-manager (skm) installed"
 
 # ── 7. LINUTIL ────────────────────────────────────────────────────────────────
-info "Installing linutil..."
+step "Linutil"
 if ! command -v linutil &>/dev/null; then
     LINUTIL_TMP=$(mktemp -d)
     curl -fsSL "https://github.com/TuxLux40/linutil/releases/latest/download/linutil" \
@@ -314,30 +363,36 @@ if ! command -v linutil &>/dev/null; then
             -o "$LINUTIL_TMP/linutil"
     install -m 755 "$LINUTIL_TMP/linutil" /usr/local/bin/linutil
     rm -rf "$LINUTIL_TMP"
+    info "linutil installed"
+else
+    info "linutil already present"
 fi
 
 # ── 8. GITHUB COPILOT CLI ─────────────────────────────────────────────────────
-info "Installing GitHub Copilot CLI..."
-curl -fsSL https://gh.io/copilot-install | bash
+step "GitHub Copilot CLI"
+yes y 2>/dev/null | bash -c 'curl -fsSL https://gh.io/copilot-install | bash' >>"$LOGFILE" 2>&1 || true
+info "Copilot CLI installed"
 
 # ── 9. CLAUDE CODE ────────────────────────────────────────────────────────────
-info "Installing Claude Code..."
-curl -fsSL https://claude.ai/install.sh | bash
+step "Claude Code"
+quiet bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+info "Claude Code installed"
 
 # ── 10. PROXMOXMCP-PLUS ───────────────────────────────────────────────────────
-info "Installing ProxmoxMCP-Plus..."
+step "ProxmoxMCP-Plus"
 PMCP_DIR="/opt/ProxmoxMCP-Plus"
 if [[ -d "$PMCP_DIR/.git" ]]; then
-    info "ProxmoxMCP-Plus already present, updating..."
-    git -C "$PMCP_DIR" pull --ff-only
+    quiet git -C "$PMCP_DIR" pull --ff-only
+    info "ProxmoxMCP-Plus updated"
 elif [[ -d "$PMCP_DIR" ]]; then
     die "$PMCP_DIR exists but is not a git repository"
 else
-    git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
+    quiet git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
+    info "ProxmoxMCP-Plus cloned"
 fi
 cd "$PMCP_DIR"
-uv venv
-uv pip install -e ".[dev]"
+quiet uv venv
+quiet uv pip install -e ".[dev]"
 mkdir -p proxmox-config
 
 if [[ ! -f "$PMCP_DIR/proxmox-config/config.json" ]]; then
@@ -412,31 +467,13 @@ fi
 warn "ProxmoxMCP: fill in token at ${PMCP_DIR}/proxmox-config/config.json"
 
 # ── 11. TIMEZONE ──────────────────────────────────────────────────────────────
-info "Setting timezone: $TIMEZONE"
+step "Timezone → $TIMEZONE"
 timedatectl set-timezone "$TIMEZONE" 2>/dev/null ||
     ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+info "Timezone set"
 
-# ── 12. LOCALE ────────────────────────────────────────────────────────────────
-info "Configuring locale: $LOCALE"
-case "$DISTRO" in
-debian | ubuntu | linuxmint)
-    sed -i "s/^# *${LOCALE} UTF-8/${LOCALE} UTF-8/" /etc/locale.gen 2>/dev/null || true
-    grep -Fqx "${LOCALE} UTF-8" /etc/locale.gen || echo "${LOCALE} UTF-8" >>/etc/locale.gen
-    locale-gen
-    update-locale LANG="$LOCALE"
-    ;;
-arch | manjaro)
-    sed -i "s/^#${LOCALE}/${LOCALE}/" /etc/locale.gen
-    locale-gen
-    echo "LANG=${LOCALE}" >/etc/locale.conf
-    ;;
-fedora)
-    localectl set-locale "LANG=${LOCALE}"
-    ;;
-esac
-
-# ── 13. BASH ENVIRONMENT ──────────────────────────────────────────────────────
-info "Configuring bash environment..."
+# ── 12. BASH ENVIRONMENT ──────────────────────────────────────────────────────
+step "Bash environment"
 BASHRC_MARKER_START="# >>> lxc-postinstall >>>"
 BASHRC_CONTENT_PROBE="export EDITOR=micro"
 if ! grep -Fqx "$BASHRC_MARKER_START" /root/.bashrc && ! grep -Fq "$BASHRC_CONTENT_PROBE" /root/.bashrc; then
@@ -555,14 +592,31 @@ fi
 
 # ── DONE ──────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        LXC post-install complete             ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}  ╔══════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}  ║         LXC post-install complete            ║${NC}"
+echo -e "${GREEN}  ╚══════════════════════════════════════════════╝${NC}"
 echo ""
-echo "  Tailscale:       tailscale up [--authkey=...]"
-echo "  ProxmoxMCP cfg:  ${PMCP_DIR}/proxmox-config/config.json"
-echo "  Claude Code:     claude"
-echo "  Linutil:         linutil"
-echo "  Skill mgr:       skm"
+echo -e "  ${BOLD}Installed tools:${NC}"
+echo -e "    ${DIM}tailscale${NC}       tailscale up [--authkey=...]"
+echo -e "    ${DIM}copilot${NC}         copilot help"
+echo -e "    ${DIM}claude${NC}          claude"
+echo -e "    ${DIM}linutil${NC}         linutil"
+echo -e "    ${DIM}skm${NC}             skill-manager"
 echo ""
-warn "Reopen shell to activate bash config + locale"
+echo -e "  ${BOLD}Config:${NC}"
+echo -e "    ${DIM}ProxmoxMCP${NC}      ${PMCP_DIR}/proxmox-config/config.json"
+echo -e "    ${DIM}Log${NC}             ${LOGFILE}"
+echo ""
+warn "Reopen shell to activate bash config"
+
+# ── OPTIONAL: Upload log to 0x0.st ───────────────────────────────────────────
+if ui_enabled && [[ -s "$LOGFILE" ]]; then
+    if ui_confirm "Upload log" "Upload install log to 0x0.st?\n\nThe log contains only package manager output — no passwords, tokens, or IPs.\nThe paste URL is unlisted (unguessable) and auto-expires."; then
+        PASTE_URL=$(curl -fsSL -F "file=@${LOGFILE}" https://0x0.st 2>/dev/null) || true
+        if [[ -n "${PASTE_URL:-}" ]]; then
+            info "Log uploaded: ${PASTE_URL}"
+        else
+            warn "Log upload failed"
+        fi
+    fi
+fi
