@@ -16,6 +16,11 @@ PROXMOX_TOKEN_NAME="${PROXMOX_TOKEN_NAME:-mcp-token}"
 PROXMOX_TOKEN_VALUE="${PROXMOX_TOKEN_VALUE:-}"
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Ensure TERM is usable for whiptail/ncurses (e.g. xterm-ghostty has no terminfo in most containers)
+if ! infocmp "$TERM" &>/dev/null 2>&1; then
+    export TERM=xterm-256color
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
