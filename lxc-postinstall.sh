@@ -201,6 +201,15 @@ pkg_install() {
 
 # ── INTERACTIVE SETUP (optional) ─────────────────────────────────────────────
 if ui_enabled; then
+    # Ensure whiptail is available for TUI dialogs
+    if ! command -v whiptail &>/dev/null; then
+        case "$DISTRO" in
+        debian | ubuntu | linuxmint) apt-get update -qq && apt-get install -y whiptail ;;
+        arch | manjaro) pacman -S --noconfirm libnewt ;;
+        fedora) dnf install -y newt ;;
+        esac
+    fi
+
     run_interactive_setup
 
     if command -v pct &>/dev/null && [[ -d /etc/pve ]]; then
