@@ -16,10 +16,164 @@ PROXMOX_TOKEN_NAME="${PROXMOX_TOKEN_NAME:-mcp-token}"
 PROXMOX_TOKEN_VALUE="${PROXMOX_TOKEN_VALUE:-}"
 # ─────────────────────────────────────────────────────────────────────────────
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-die()     { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+info() { echo -e "${GREEN}[+]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+die() {
+    echo -e "${RED}[✗]${NC} $*" >&2
+    exit 1
+}
+
+NON_INTERACTIVE=0
+FORCE_INTERACTIVE=0
+for arg in "$@"; do
+    case "$arg" in
+    --non-interactive) NON_INTERACTIVE=1 ;;
+    --interactive) FORCE_INTERACTIVE=1 ;;
+    esac
+done
+
+ui_has_whiptail() {
+    command -v whiptail &>/dev/null && [[ -t 0 ]] && [[ -t 1 ]]
+}
+
+ui_enabled() {
+    if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+        return 1
+    fi
+    if [[ "$FORCE_INTERACTIVE" -eq 1 ]]; then
+        return 0
+    fi
+    [[ -t 0 ]] && [[ -t 1 ]]
+}
+
+ui_input() {
+    local title="$1" prompt="$2" default_value="$3" secret="${4:-0}" value
+    if ui_has_whiptail; then
+        if [[ "$secret" -eq 1 ]]; then
+            value=$(whiptail --title "$title" --passwordbox "$prompt" 12 78 "$default_value" 3>&1 1>&2 2>&3) || die "Cancelled"
+        else
+            value=$(whiptail --title "$title" --inputbox "$prompt" 12 78 "$default_value" 3>&1 1>&2 2>&3) || die "Cancelled"
+        fi
+    else
+        echo "$title"
+        if [[ "$secret" -eq 1 ]]; then
+            read -r -s -p "$prompt [$default_value]: " value
+            echo ""
+        else
+            read -r -p "$prompt [$default_value]: " value
+        fi
+        [[ -z "$value" ]] && value="$default_value"
+    fi
+    printf '%s' "$value"
+}
+
+ui_confirm() {
+    local title="$1" prompt="$2"
+    if ui_has_whiptail; then
+        whiptail --title "$title" --yesno "$prompt" 12 78
+        return $?
+    fi
+    local answer
+    read -r -p "$prompt [y/N]: " answer
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+ui_select_containers() {
+    local -a options=()
+    local vmid status name
+    while IFS='|' read -r vmid status name; do
+        [[ -z "$vmid" ]] && continue
+        options+=("$vmid" "$name [$status]" "OFF")
+    done < <(pct list | awk 'NR>1 {print $1"|"$2"|"$4}')
+
+    [[ ${#options[@]} -eq 0 ]] && return 0
+
+    if ui_has_whiptail; then
+        local selected
+        selected=$(whiptail --title "Select Containers" --checklist "Select target CTIDs" 20 90 10 "${options[@]}" 3>&1 1>&2 2>&3) || return 0
+        selected=${selected//\"/}
+        printf '%s\n' $selected
+    else
+        warn "Available containers:"
+        pct list
+        local ids
+        read -r -p "Enter CTIDs separated by spaces: " ids
+        printf '%s\n' $ids
+    fi
+}
+
+run_for_selected_containers() {
+    local -a selected_ctids=("$@")
+    local script_src="$SCRIPT_DIR/lxc-postinstall.sh"
+    local tmp_script=""
+    local tmp_env
+
+    if [[ ! -f "$script_src" ]]; then
+        tmp_script=$(mktemp)
+        cat "${BASH_SOURCE[0]}" >"$tmp_script"
+        script_src="$tmp_script"
+    fi
+
+    tmp_env=$(mktemp)
+
+    cat >"$tmp_env" <<EOF
+TIMEZONE=$TIMEZONE
+LOCALE=$LOCALE
+TS_AUTHKEY=$TS_AUTHKEY
+PROXMOX_HOST=$PROXMOX_HOST
+PROXMOX_USER=$PROXMOX_USER
+PROXMOX_TOKEN_NAME=$PROXMOX_TOKEN_NAME
+PROXMOX_TOKEN_VALUE=$PROXMOX_TOKEN_VALUE
+EOF
+
+    for ctid in "${selected_ctids[@]}"; do
+        [[ -z "$ctid" ]] && continue
+        info "Configuring container CTID $ctid..."
+        if ! pct status "$ctid" 2>/dev/null | grep -q 'status: running'; then
+            warn "CTID $ctid is not running, skipping."
+            continue
+        fi
+
+        pct push "$ctid" "$script_src" /root/lxc-postinstall.sh
+        pct push "$ctid" "$tmp_env" /root/.env
+        pct exec "$ctid" -- bash /root/lxc-postinstall.sh --non-interactive ||
+            warn "Setup failed in CTID $ctid"
+    done
+
+    rm -f "$tmp_env"
+    [[ -n "$tmp_script" ]] && rm -f "$tmp_script"
+}
+
+save_env() {
+    cat >"$SCRIPT_DIR/.env" <<EOF
+TIMEZONE=$TIMEZONE
+LOCALE=$LOCALE
+TS_AUTHKEY=$TS_AUTHKEY
+PROXMOX_HOST=$PROXMOX_HOST
+PROXMOX_USER=$PROXMOX_USER
+PROXMOX_TOKEN_NAME=$PROXMOX_TOKEN_NAME
+PROXMOX_TOKEN_VALUE=$PROXMOX_TOKEN_VALUE
+EOF
+    info "Saved settings to $SCRIPT_DIR/.env"
+}
+
+run_interactive_setup() {
+    TIMEZONE=$(ui_input "Timezone" "Enter timezone" "$TIMEZONE")
+    LOCALE=$(ui_input "Locale" "Enter locale" "$LOCALE")
+    TS_AUTHKEY=$(ui_input "Tailscale" "Enter TS_AUTHKEY (leave empty to skip join)" "$TS_AUTHKEY" 1)
+    PROXMOX_HOST=$(ui_input "Proxmox" "Enter PROXMOX_HOST" "$PROXMOX_HOST")
+    PROXMOX_USER=$(ui_input "Proxmox" "Enter PROXMOX_USER" "$PROXMOX_USER")
+    PROXMOX_TOKEN_NAME=$(ui_input "Proxmox" "Enter PROXMOX_TOKEN_NAME" "$PROXMOX_TOKEN_NAME")
+    PROXMOX_TOKEN_VALUE=$(ui_input "Proxmox" "Enter PROXMOX_TOKEN_VALUE" "$PROXMOX_TOKEN_VALUE" 1)
+
+    if ui_confirm "Save Defaults" "Save these settings as defaults in .env for future runs?"; then
+        save_env
+    fi
+}
 
 [[ $EUID -ne 0 ]] && die "Must run as root"
 
@@ -33,61 +187,82 @@ fi
 
 pkg_install() {
     case "$DISTRO" in
-        debian|ubuntu|linuxmint) apt-get install -y "$@" ;;
-        arch|manjaro)            pacman -S --noconfirm "$@" ;;
-        fedora)                  dnf install -y "$@" ;;
-        *)                       die "Unsupported distro: $DISTRO" ;;
+    debian | ubuntu | linuxmint) apt-get install -y "$@" ;;
+    arch | manjaro) pacman -S --noconfirm "$@" ;;
+    fedora) dnf install -y "$@" ;;
+    *) die "Unsupported distro: $DISTRO" ;;
     esac
 }
+
+# ── INTERACTIVE SETUP (optional) ─────────────────────────────────────────────
+if ui_enabled; then
+    run_interactive_setup
+
+    if command -v pct &>/dev/null && [[ -d /etc/pve ]]; then
+        if ui_confirm "Target Mode" "Detected Proxmox host. Configure selected containers now?"; then
+            mapfile -t TARGET_CTIDS < <(ui_select_containers)
+            if [[ ${#TARGET_CTIDS[@]} -gt 0 ]]; then
+                run_for_selected_containers "${TARGET_CTIDS[@]}"
+                info "Container batch setup complete."
+                exit 0
+            fi
+            warn "No containers selected, continuing on current system."
+        fi
+    fi
+fi
 
 # ── 1. SYSTEM UPDATE ──────────────────────────────────────────────────────────
 info "Updating system packages..."
 case "$DISTRO" in
-    debian|ubuntu|linuxmint)
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        apt-get upgrade -y -o Dpkg::Options::="--force-confold"
-        ;;
-    arch|manjaro) pacman -Syu --noconfirm ;;
-    fedora)       dnf upgrade -y ;;
+debian | ubuntu | linuxmint)
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get upgrade -y -o Dpkg::Options::="--force-confold"
+    ;;
+arch | manjaro) pacman -Syu --noconfirm ;;
+fedora) dnf upgrade -y ;;
 esac
 
 # ── 2. BASE PACKAGES ──────────────────────────────────────────────────────────
 info "Installing base packages..."
 case "$DISTRO" in
-    debian|ubuntu|linuxmint)
-        pkg_install \
-            curl wget git micro fish fastfetch \
-            htop btop net-tools dnsutils tree \
-            unzip tar ca-certificates gnupg lsb-release \
-            build-essential procps locales \
-            trash-cli python3 python3-pip python3-venv
-        ;;
-    arch|manjaro)
-        pkg_install curl wget git micro fish fastfetch htop btop \
-            net-tools unzip tar base-devel tree trash-cli python python-pip
-        ;;
-    fedora)
-        pkg_install curl wget git micro fish fastfetch htop btop \
-            net-tools unzip tar gcc tree trash-cli python3 python3-pip
-        ;;
+debian | ubuntu | linuxmint)
+    pkg_install \
+        curl wget git micro fish fastfetch \
+        htop btop net-tools dnsutils tree \
+        unzip tar ca-certificates gnupg lsb-release \
+        build-essential procps locales \
+        trash-cli python3 python3-pip python3-venv
+    ;;
+arch | manjaro)
+    pkg_install curl wget git micro fish fastfetch htop btop \
+        net-tools unzip tar base-devel tree trash-cli python python-pip
+    ;;
+fedora)
+    pkg_install curl wget git micro fish fastfetch htop btop \
+        net-tools unzip tar gcc tree trash-cli python3 python3-pip
+    ;;
 esac
 
 # ── 3. UV (Python package manager) ───────────────────────────────────────────
-info "Installing uv..."
-curl -LsSf https://astral.sh/uv/install.sh | sh
+if ! command -v uv &>/dev/null; then
+    info "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+else
+    info "uv already present: $(uv --version)"
+fi
 export PATH="$HOME/.local/bin:$PATH"
 
 # ── 4. NODE.JS (LTS) ──────────────────────────────────────────────────────────
 if ! command -v node &>/dev/null; then
     info "Installing Node.js LTS..."
     case "$DISTRO" in
-        debian|ubuntu|linuxmint)
-            curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-            apt-get install -y nodejs
-            ;;
-        arch|manjaro)  pkg_install nodejs npm ;;
-        fedora)        dnf install -y nodejs npm ;;
+    debian | ubuntu | linuxmint)
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+        apt-get install -y nodejs
+        ;;
+    arch | manjaro) pkg_install nodejs npm ;;
+    fedora) dnf install -y nodejs npm ;;
     esac
 else
     info "Node.js already present: $(node -v)"
@@ -99,8 +274,12 @@ curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
 
 if [[ -n "$TS_AUTHKEY" ]]; then
-    info "Joining Tailnet..."
-    tailscale up --authkey="$TS_AUTHKEY" --accept-routes
+    if tailscale ip -4 &>/dev/null || tailscale ip -6 &>/dev/null; then
+        info "Already connected to Tailnet, skipping join."
+    else
+        info "Joining Tailnet..."
+        tailscale up --authkey="$TS_AUTHKEY" --accept-routes
+    fi
 else
     warn "Tailscale installed but not joined. Run: tailscale up"
 fi
@@ -114,9 +293,9 @@ info "Installing linutil..."
 if ! command -v linutil &>/dev/null; then
     LINUTIL_TMP=$(mktemp -d)
     curl -fsSL "https://github.com/TuxLux40/linutil/releases/latest/download/linutil" \
-        -o "$LINUTIL_TMP/linutil" 2>/dev/null \
-    || curl -fsSL "https://github.com/ChrisTitusTech/linutil/releases/latest/download/linutil" \
-        -o "$LINUTIL_TMP/linutil"
+        -o "$LINUTIL_TMP/linutil" 2>/dev/null ||
+        curl -fsSL "https://github.com/ChrisTitusTech/linutil/releases/latest/download/linutil" \
+            -o "$LINUTIL_TMP/linutil"
     install -m 755 "$LINUTIL_TMP/linutil" /usr/local/bin/linutil
     rm -rf "$LINUTIL_TMP"
 fi
@@ -132,13 +311,20 @@ curl -fsSL https://claude.ai/install.sh | bash
 # ── 10. PROXMOXMCP-PLUS ───────────────────────────────────────────────────────
 info "Installing ProxmoxMCP-Plus..."
 PMCP_DIR="/opt/ProxmoxMCP-Plus"
-git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
+if [[ -d "$PMCP_DIR/.git" ]]; then
+    info "ProxmoxMCP-Plus already present, updating..."
+    git -C "$PMCP_DIR" pull --ff-only
+elif [[ -d "$PMCP_DIR" ]]; then
+    die "$PMCP_DIR exists but is not a git repository"
+else
+    git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
+fi
 cd "$PMCP_DIR"
 uv venv
 uv pip install -e ".[dev]"
 mkdir -p proxmox-config
 
-cat > "$PMCP_DIR/proxmox-config/config.json" << PMCPEOF
+cat >"$PMCP_DIR/proxmox-config/config.json" <<PMCPEOF
 {
     "proxmox": {
         "host": "${PROXMOX_HOST:-YOUR_PROXMOX_HOST}",
@@ -167,7 +353,7 @@ cd /
 # Claude Code MCP config
 CLAUDE_MCP_DIR="/root/.config/Claude"
 mkdir -p "$CLAUDE_MCP_DIR"
-cat > "$CLAUDE_MCP_DIR/claude_desktop_config.json" << MCPEOF
+cat >"$CLAUDE_MCP_DIR/claude_desktop_config.json" <<MCPEOF
 {
     "mcpServers": {
         "ProxmoxMCP-Plus": {
@@ -186,31 +372,35 @@ warn "ProxmoxMCP: fill in token at ${PMCP_DIR}/proxmox-config/config.json"
 
 # ── 11. TIMEZONE ──────────────────────────────────────────────────────────────
 info "Setting timezone: $TIMEZONE"
-timedatectl set-timezone "$TIMEZONE" 2>/dev/null \
-    || ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+timedatectl set-timezone "$TIMEZONE" 2>/dev/null ||
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 
 # ── 12. LOCALE ────────────────────────────────────────────────────────────────
 info "Configuring locale: $LOCALE"
 case "$DISTRO" in
-    debian|ubuntu|linuxmint)
-        sed -i "s/^# *${LOCALE} UTF-8/${LOCALE} UTF-8/" /etc/locale.gen 2>/dev/null || true
-        echo "${LOCALE} UTF-8" >> /etc/locale.gen
-        locale-gen
-        update-locale LANG="$LOCALE"
-        ;;
-    arch|manjaro)
-        sed -i "s/^#${LOCALE}/${LOCALE}/" /etc/locale.gen
-        locale-gen
-        echo "LANG=${LOCALE}" > /etc/locale.conf
-        ;;
-    fedora)
-        localectl set-locale "LANG=${LOCALE}"
-        ;;
+debian | ubuntu | linuxmint)
+    sed -i "s/^# *${LOCALE} UTF-8/${LOCALE} UTF-8/" /etc/locale.gen 2>/dev/null || true
+    grep -Fqx "${LOCALE} UTF-8" /etc/locale.gen || echo "${LOCALE} UTF-8" >>/etc/locale.gen
+    locale-gen
+    update-locale LANG="$LOCALE"
+    ;;
+arch | manjaro)
+    sed -i "s/^#${LOCALE}/${LOCALE}/" /etc/locale.gen
+    locale-gen
+    echo "LANG=${LOCALE}" >/etc/locale.conf
+    ;;
+fedora)
+    localectl set-locale "LANG=${LOCALE}"
+    ;;
 esac
 
 # ── 13. BASH ENVIRONMENT ──────────────────────────────────────────────────────
 info "Configuring bash environment..."
-cat >> /root/.bashrc << 'EOF'
+BASHRC_MARKER_START="# >>> lxc-postinstall >>>"
+if ! grep -Fqx "$BASHRC_MARKER_START" /root/.bashrc; then
+    cat >>/root/.bashrc <<'EOF'
+
+# >>> lxc-postinstall >>>
 
 # ── colors & prompt ───────────────────────────────────────────────────────────
 export TERM=xterm-256color
@@ -314,7 +504,12 @@ export PATH="$HOME/.local/bin:$PATH"
 # ── bash completion ───────────────────────────────────────────────────────────
 [[ -f /usr/share/bash-completion/bash_completion ]] \
     && source /usr/share/bash-completion/bash_completion
+
+# <<< lxc-postinstall <<<
 EOF
+else
+    info "Bash environment block already present, skipping append."
+fi
 
 # ── 14. SSH: KEY-ONLY AUTH ────────────────────────────────────────────────────
 if [[ -f /etc/ssh/sshd_config ]]; then

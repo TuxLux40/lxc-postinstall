@@ -16,6 +16,19 @@ Optional with environment variables in one command:
 TIMEZONE=Europe/Berlin LOCALE=de_DE.UTF-8 TS_AUTHKEY=... PROXMOX_HOST=... PROXMOX_USER=root@pam PROXMOX_TOKEN_NAME=mcp-token PROXMOX_TOKEN_VALUE=... bash <(curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh)
 ```
 
+## Interactive Mode
+
+By default (when run in a TTY), the script opens an interactive flow where you can:
+
+- Set `TIMEZONE`, `LOCALE`, `TS_AUTHKEY`, and Proxmox MCP credentials
+- On a Proxmox host, choose target containers (CTIDs) and run setup in batch
+
+You can disable prompts for automation:
+
+```bash
+sudo bash lxc-postinstall.sh --non-interactive
+```
+
 ## Prerequisites
 
 - Run inside an LXC container where you want the setup applied
