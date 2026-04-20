@@ -111,9 +111,9 @@ ui_input() {
 }
 
 ui_confirm() {
-    local title="$1" prompt="$2" no_text="${3:-No}"
+    local title="$1" prompt="$2" no_text="${3:-No}" yes_text="${4:-Yes}"
     if ui_has_whiptail; then
-        whiptail --title "$title" --yesno --no-button "$no_text" "$prompt" 20 78
+        whiptail --title "$title" --yes-button "$yes_text" --no-button "$no_text" --yesno "$prompt" 20 78
         return $?
     fi
     local answer
@@ -127,13 +127,13 @@ ui_select_containers() {
     while IFS='|' read -r vmid status name; do
         [[ -z "$vmid" ]] && continue
         options+=("$vmid" "$name [$status]" "OFF")
-    done < <(pct list | awk 'NR>1 {print $1"|"$2"|"$4}')
+    done < <(pct list | awk 'NR>1 {print $1"|"$2"|"$NF}')
 
     [[ ${#options[@]} -eq 0 ]] && return 0
 
     if ui_has_whiptail; then
         local selected
-        selected=$(whiptail --title "Select Containers" --checklist "Select target CTIDs" 20 90 10 "${options[@]}" 3>&1 1>&2 2>&3) || return 0
+        selected=$(whiptail --title "Select Containers" --ok-button "Install" --cancel-button "Skip (current host only)" --checklist "Select containers to configure (SPACE to toggle, ENTER to confirm):" 20 90 10 "${options[@]}" 3>&1 1>&2 2>&3) || return 0
         selected=${selected//\"/}
         printf '%s\n' $selected
     else
@@ -250,17 +250,13 @@ if ui_enabled; then
     fi
 
     if command -v pct &>/dev/null && [[ -d /etc/pve ]]; then
-        ct_list=$(pct list 2>/dev/null | awk 'NR>1 {printf "  %s  %s  (%s)\n", $1, $4, $2}')
-        ct_msg="Detected Proxmox host.\n\nAvailable containers:\n${ct_list}\n\nConfigure selected containers now?"
-        if ui_confirm "Target Mode" "$ct_msg" "Run on current host only"; then
-            mapfile -t TARGET_CTIDS < <(ui_select_containers)
-            if [[ ${#TARGET_CTIDS[@]} -gt 0 ]]; then
-                run_for_selected_containers "${TARGET_CTIDS[@]}"
-                info "Container batch setup complete."
-                exit 0
-            fi
-            warn "No containers selected, continuing on current system."
+        mapfile -t TARGET_CTIDS < <(ui_select_containers)
+        if [[ ${#TARGET_CTIDS[@]} -gt 0 ]]; then
+            run_for_selected_containers "${TARGET_CTIDS[@]}"
+            info "Container batch setup complete."
+            exit 0
         fi
+        info "No containers selected, continuing on current host."
     fi
 fi
 
@@ -278,18 +274,9 @@ esac
 info "System up to date"
 
 # Update other package managers if already installed
-command -v npm &>/dev/null && {
-    quiet npm update -g
-    info "npm globals updated"
-} || true
-command -v uv &>/dev/null && {
-    quiet uv self update
-    info "uv updated"
-} || true
-command -v pip3 &>/dev/null && {
-    quiet pip3 install --upgrade pip 2>/dev/null
-    info "pip updated"
-} || true
+command -v npm &>/dev/null && { npm update -g >>"$LOGFILE" 2>&1 && info "npm globals updated" || warn "npm update failed (non-critical)"; }
+command -v uv &>/dev/null && { uv self update >>"$LOGFILE" 2>&1 && info "uv updated" || warn "uv update failed (non-critical)"; }
+command -v pip3 &>/dev/null && { pip3 install --upgrade pip >>"$LOGFILE" 2>&1 && info "pip updated" || warn "pip update failed (non-critical)"; }
 
 # ── 2. BASE PACKAGES ──────────────────────────────────────────────────────────
 step "Installing base packages"
