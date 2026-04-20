@@ -42,7 +42,7 @@ for arg in "$@"; do
 done
 
 ui_has_whiptail() {
-    command -v whiptail &>/dev/null && [[ -t 0 ]] && [[ -t 1 ]]
+    command -v whiptail &>/dev/null
 }
 
 ui_enabled() {
