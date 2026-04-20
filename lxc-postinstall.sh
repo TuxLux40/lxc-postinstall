@@ -360,7 +360,8 @@ cd /
 CLAUDE_MCP_DIR="/root/.config/Claude"
 CLAUDE_MCP_FILE="$CLAUDE_MCP_DIR/claude_desktop_config.json"
 mkdir -p "$CLAUDE_MCP_DIR"
-PMCP_ENTRY=$(cat <<MCPEOF
+PMCP_ENTRY=$(
+    cat <<MCPEOF
 {
     "command": "${PMCP_DIR}/.venv/bin/python",
     "args": ["-m", "proxmox_mcp.server"],
