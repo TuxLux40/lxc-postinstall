@@ -326,7 +326,8 @@ uv venv
 uv pip install -e ".[dev]"
 mkdir -p proxmox-config
 
-cat >"$PMCP_DIR/proxmox-config/config.json" <<PMCPEOF
+if [[ ! -f "$PMCP_DIR/proxmox-config/config.json" ]]; then
+    cat >"$PMCP_DIR/proxmox-config/config.json" <<PMCPEOF
 {
     "proxmox": {
         "host": "${PROXMOX_HOST:-YOUR_PROXMOX_HOST}",
@@ -350,25 +351,48 @@ cat >"$PMCP_DIR/proxmox-config/config.json" <<PMCPEOF
     }
 }
 PMCPEOF
+else
+    info "ProxmoxMCP config.json already exists, preserving."
+fi
 cd /
 
-# Claude Code MCP config
+# Claude Code MCP config (merge, don't overwrite)
 CLAUDE_MCP_DIR="/root/.config/Claude"
+CLAUDE_MCP_FILE="$CLAUDE_MCP_DIR/claude_desktop_config.json"
 mkdir -p "$CLAUDE_MCP_DIR"
-cat >"$CLAUDE_MCP_DIR/claude_desktop_config.json" <<MCPEOF
+PMCP_ENTRY=$(cat <<MCPEOF
 {
-    "mcpServers": {
-        "ProxmoxMCP-Plus": {
-            "command": "${PMCP_DIR}/.venv/bin/python",
-            "args": ["-m", "proxmox_mcp.server"],
-            "env": {
-                "PYTHONPATH": "${PMCP_DIR}/src",
-                "PROXMOX_MCP_CONFIG": "${PMCP_DIR}/proxmox-config/config.json"
-            }
-        }
+    "command": "${PMCP_DIR}/.venv/bin/python",
+    "args": ["-m", "proxmox_mcp.server"],
+    "env": {
+        "PYTHONPATH": "${PMCP_DIR}/src",
+        "PROXMOX_MCP_CONFIG": "${PMCP_DIR}/proxmox-config/config.json"
     }
 }
 MCPEOF
+)
+if [[ -f "$CLAUDE_MCP_FILE" ]] && command -v python3 &>/dev/null; then
+    python3 -c "
+import json, sys
+entry = json.loads(sys.argv[1])
+try:
+    with open(sys.argv[2]) as f:
+        cfg = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    cfg = {}
+cfg.setdefault('mcpServers', {})['ProxmoxMCP-Plus'] = entry
+with open(sys.argv[2], 'w') as f:
+    json.dump(cfg, f, indent=4)
+" "$PMCP_ENTRY" "$CLAUDE_MCP_FILE"
+else
+    cat >"$CLAUDE_MCP_FILE" <<MCPEOF2
+{
+    "mcpServers": {
+        "ProxmoxMCP-Plus": $PMCP_ENTRY
+    }
+}
+MCPEOF2
+fi
 
 warn "ProxmoxMCP: fill in token at ${PMCP_DIR}/proxmox-config/config.json"
 
@@ -399,7 +423,8 @@ esac
 # ── 13. BASH ENVIRONMENT ──────────────────────────────────────────────────────
 info "Configuring bash environment..."
 BASHRC_MARKER_START="# >>> lxc-postinstall >>>"
-if ! grep -Fqx "$BASHRC_MARKER_START" /root/.bashrc; then
+BASHRC_CONTENT_PROBE="export EDITOR=micro"
+if ! grep -Fqx "$BASHRC_MARKER_START" /root/.bashrc && ! grep -Fq "$BASHRC_CONTENT_PROBE" /root/.bashrc; then
     cat >>/root/.bashrc <<'EOF'
 
 # >>> lxc-postinstall >>>
@@ -484,7 +509,7 @@ alias 644='chmod -R 644'
 # ── tools ─────────────────────────────────────────────────────────────────────
 alias g='git'
 alias ts='tailscale'
-alias sm='skill-manager'
+alias sm='skm'
 alias grep='grep --color=auto'
 alias diff='diff --color=auto'
 alias ip='ip --color=auto'
@@ -523,6 +548,6 @@ echo "  Tailscale:       tailscale up [--authkey=...]"
 echo "  ProxmoxMCP cfg:  ${PMCP_DIR}/proxmox-config/config.json"
 echo "  Claude Code:     claude"
 echo "  Linutil:         linutil"
-echo "  Skill mgr:       skill-manager"
+echo "  Skill mgr:       skm"
 echo ""
 warn "Reopen shell to activate bash config + locale"

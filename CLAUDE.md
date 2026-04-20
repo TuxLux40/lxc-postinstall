@@ -22,15 +22,15 @@ The script sources `.env` from its own directory at startup — no export needed
 
 All config is env-driven with defaults baked into the script:
 
-| Var | Default | Purpose |
-|-----|---------|---------|
-| `TIMEZONE` | `Europe/Berlin` | timedatectl / symlink |
-| `LOCALE` | `de_DE.UTF-8` | locale-gen |
-| `TS_AUTHKEY` | *(empty)* | Tailscale auto-join; skip if unset |
-| `PROXMOX_HOST` | *(empty)* | ProxmoxMCP-Plus config.json |
-| `PROXMOX_USER` | `root@pam` | ProxmoxMCP-Plus auth |
-| `PROXMOX_TOKEN_NAME` | `mcp-token` | ProxmoxMCP-Plus auth |
-| `PROXMOX_TOKEN_VALUE` | *(empty)* | ProxmoxMCP-Plus auth — must fill manually |
+| Var                   | Default         | Purpose                                   |
+| --------------------- | --------------- | ----------------------------------------- |
+| `TIMEZONE`            | `Europe/Berlin` | timedatectl / symlink                     |
+| `LOCALE`              | `de_DE.UTF-8`   | locale-gen                                |
+| `TS_AUTHKEY`          | _(empty)_       | Tailscale auto-join; skip if unset        |
+| `PROXMOX_HOST`        | _(empty)_       | ProxmoxMCP-Plus config.json               |
+| `PROXMOX_USER`        | `root@pam`      | ProxmoxMCP-Plus auth                      |
+| `PROXMOX_TOKEN_NAME`  | `mcp-token`     | ProxmoxMCP-Plus auth                      |
+| `PROXMOX_TOKEN_VALUE` | _(empty)_       | ProxmoxMCP-Plus auth — must fill manually |
 
 ## What the script installs (in order)
 
