@@ -38,7 +38,7 @@ All config is env-driven with defaults baked into the script:
 2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, net-tools, build tools, python3/pip/venv
 3. `uv` (Python package manager via astral.sh)
 4. Node.js LTS (nodesource for Debian/Ubuntu)
-5. Tailscale (joins tailnet if `TS_AUTHKEY` set)
+5. Tailscale (joins tailnet if `TS_AUTHKEY` set, enables Tailscale SSH)
 6. npm globals: `skill-manager`
 7. `linutil` (TuxLux40 fork, fallback to ChrisTitusTech)
 8. GitHub Copilot CLI
@@ -47,7 +47,6 @@ All config is env-driven with defaults baked into the script:
 11. Timezone
 12. Locale
 13. Bash environment (appended to `/root/.bashrc`)
-14. SSH hardening (key-only, password auth disabled)
 
 ## Adding new steps
 

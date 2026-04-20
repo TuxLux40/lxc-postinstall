@@ -280,6 +280,8 @@ if [[ -n "$TS_AUTHKEY" ]]; then
         info "Joining Tailnet..."
         tailscale up --authkey="$TS_AUTHKEY" --accept-routes
     fi
+    info "Enabling Tailscale SSH..."
+    tailscale set --ssh
 else
     warn "Tailscale installed but not joined. Run: tailscale up"
 fi
@@ -509,18 +511,6 @@ export PATH="$HOME/.local/bin:$PATH"
 EOF
 else
     info "Bash environment block already present, skipping append."
-fi
-
-# ── 14. SSH: KEY-ONLY AUTH ────────────────────────────────────────────────────
-if [[ -f /etc/ssh/sshd_config ]]; then
-    info "Hardening SSH (key-only auth)..."
-    sed -i \
-        -e 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' \
-        -e 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' \
-        -e 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' \
-        /etc/ssh/sshd_config
-    systemctl reload sshd 2>/dev/null || true
-    warn "SSH password auth disabled — ensure pubkey is in /root/.ssh/authorized_keys first!"
 fi
 
 # ── DONE ──────────────────────────────────────────────────────────────────────

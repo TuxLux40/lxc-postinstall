@@ -62,7 +62,7 @@ For complete variable details, defaults, and behavior, see [CLAUDE.md](CLAUDE.md
 
 - Do not commit `.env` with real credentials or tokens.
 - Keep secret values empty in `.env.example`.
-- The script enforces SSH key-only authentication; ensure `/root/.ssh/authorized_keys` is in place before relying on SSH access.
+- The script enables Tailscale SSH (`tailscale set --ssh`) when a Tailscale auth key is provided.
 
 ## Validation
 
