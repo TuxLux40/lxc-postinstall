@@ -178,7 +178,7 @@ EOF
         pct push "$ctid" "$script_src" /root/lxc-postinstall.sh
         pct push "$ctid" "$tmp_env" /root/.env
         pct exec "$ctid" -- bash /root/lxc-postinstall.sh --non-interactive ||
-            warn "Setup failed in CTID $ctid"
+            { warn "Setup failed in CTID $ctid"; pct pull "$ctid" /var/log/lxc-postinstall.log "/tmp/lxc-postinstall-${ctid}.log" 2>/dev/null && warn "Log copied to /tmp/lxc-postinstall-${ctid}.log"; }
     done
 
     rm -f "$tmp_env"
@@ -284,23 +284,23 @@ case "$DISTRO" in
 debian | ubuntu | linuxmint)
     pkg_install \
         curl wget git micro fish \
-        htop btop net-tools dnsutils tree \
+        htop btop net-tools dnsutils tree bat \
         unzip tar ca-certificates gnupg lsb-release \
         build-essential procps \
         trash-cli python3 python3-pip python3-venv
     # fastfetch: not in default Debian/Ubuntu repos — use PPA
     if ! command -v fastfetch &>/dev/null; then
-        quiet add-apt-repository -y ppa:zhangsongcui3371/fastfetch 2>/dev/null ||
+        add-apt-repository -y ppa:zhangsongcui3371/fastfetch >>"$LOGFILE" 2>&1 ||
             quiet bash -c 'curl -sLo /tmp/ff.deb https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb && dpkg -i /tmp/ff.deb && rm -f /tmp/ff.deb'
     fi
     ;;
 arch | manjaro)
     pkg_install curl wget git micro fish fastfetch htop btop \
-        net-tools unzip tar base-devel tree trash-cli python python-pip
+        net-tools unzip tar base-devel tree bat trash-cli python python-pip
     ;;
 fedora)
     pkg_install curl wget git micro fish fastfetch htop btop \
-        net-tools unzip tar gcc tree trash-cli python3 python3-pip
+        net-tools unzip tar gcc tree bat trash-cli python3 python3-pip
     ;;
 esac
 info "Base packages installed"

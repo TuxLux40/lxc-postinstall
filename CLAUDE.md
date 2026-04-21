@@ -35,7 +35,7 @@ All config is env-driven with defaults baked into the script:
 ## What the script installs (in order)
 
 1. System update
-2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, net-tools, build tools, python3/pip/venv
+2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, bat, net-tools, build tools, python3/pip/venv
 3. `uv` (Python package manager via astral.sh)
 4. Node.js LTS (nodesource for Debian/Ubuntu)
 5. Tailscale (joins tailnet if `TS_AUTHKEY` set, enables Tailscale SSH)
