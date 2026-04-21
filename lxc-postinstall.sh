@@ -368,7 +368,7 @@ fi
 # ── 5. TAILSCALE ──────────────────────────────────────────────────────────────
 step "Tailscale"
 quiet bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'
-quiet systemctl enable --now tailscaled || true
+systemctl enable --now tailscaled >>"$LOGFILE" 2>&1 || true
 
 # Wait for tailscaled to be ready (up to 10s)
 for i in $(seq 1 20); do
@@ -380,17 +380,11 @@ if [[ -n "$TS_AUTHKEY" ]]; then
     if tailscale ip -4 &>/dev/null || tailscale ip -6 &>/dev/null; then
         info "Already connected to Tailnet"
     else
-        if tailscale status &>/dev/null; then
-            quiet tailscale up --authkey="$TS_AUTHKEY" --accept-routes
-            info "Joined Tailnet"
-        else
-            warn "tailscaled not running — skipping join"
-        fi
+        quiet tailscale up --authkey="$TS_AUTHKEY" --accept-routes
+        info "Joined Tailnet"
     fi
-    if tailscale status &>/dev/null; then
-        quiet tailscale set --ssh
-        info "Tailscale SSH enabled"
-    fi
+    quiet tailscale set --ssh
+    info "Tailscale SSH enabled"
 else
     warn "Tailscale installed — not joined (no TS_AUTHKEY)"
 fi
@@ -417,7 +411,9 @@ fi
 
 # ── 8. GITHUB COPILOT CLI ─────────────────────────────────────────────────────
 step "GitHub Copilot CLI"
-yes y 2>/dev/null | bash -c 'curl -fsSL https://gh.io/copilot-install | bash' >>"$LOGFILE" 2>&1 || true
+curl -fsSL https://gh.io/copilot-install -o /tmp/copilot-install.sh
+yes y | bash /tmp/copilot-install.sh >>"$LOGFILE" 2>&1 || true
+rm -f /tmp/copilot-install.sh
 info "Copilot CLI installed"
 
 # ── 9. CLAUDE CODE ────────────────────────────────────────────────────────────
