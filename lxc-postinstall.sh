@@ -69,8 +69,19 @@ pkg() {
 step "Repos and system update"
 case "$DISTRO" in
 debian|ubuntu|linuxmint)
-    # nodesource setup runs apt-get update internally — reuse that pass
-    { curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1
+    mkdir -p /etc/apt/keyrings
+    # nodesource — manual key+sources so we control when apt-get update runs
+    { curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor > /etc/apt/keyrings/nodesource.gpg; } >>"$LOGFILE" 2>&1
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_lts.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list
+    # gh CLI
+    { curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | gpg --dearmor > /etc/apt/keyrings/githubcli.gpg; } >>"$LOGFILE" 2>&1
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list
+    # One update covers all new repos
+    q apt-get update -qq
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
 arch|manjaro)
@@ -78,8 +89,6 @@ arch|manjaro)
     ;;
 fedora)
     q dnf upgrade -y
-    { curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1 || \
-        warn "nodesource for fedora failed — will install nodejs from distro repo"
     ;;
 esac
 info "System updated"
@@ -90,7 +99,7 @@ case "$DISTRO" in
 debian|ubuntu|linuxmint)
     pkg curl wget git micro fish htop btop net-tools dnsutils tree bat \
         unzip tar ca-certificates gnupg lsb-release build-essential procps \
-        trash-cli python3 python3-venv nodejs
+        trash-cli python3 python3-venv nodejs gh
     if ! command -v fastfetch &>/dev/null; then
         { curl -sLo /tmp/ff.deb \
             https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb \
@@ -100,11 +109,11 @@ debian|ubuntu|linuxmint)
     ;;
 arch|manjaro)
     pkg curl wget git micro fish fastfetch htop btop \
-        net-tools unzip tar base-devel tree bat trash-cli python nodejs npm
+        net-tools unzip tar base-devel tree bat trash-cli python nodejs npm github-cli
     ;;
 fedora)
     pkg curl wget git micro fish fastfetch htop btop \
-        net-tools unzip tar gcc tree bat trash-cli python3 nodejs npm
+        net-tools unzip tar gcc tree bat trash-cli python3 nodejs npm gh
     ;;
 esac
 info "Base packages installed"
@@ -163,11 +172,8 @@ info "skill-manager (skm) installed"
 
 # ── 6. COPILOT CLI ────────────────────────────────────────────────────────────
 step "GitHub Copilot CLI"
-{ curl -fsSL https://gh.io/copilot-install -o /tmp/copilot-install.sh \
-&& yes y | bash /tmp/copilot-install.sh; } >>"$LOGFILE" 2>&1 || \
-    warn "Copilot CLI install failed (non-critical)"
-rm -f /tmp/copilot-install.sh
-info "Copilot CLI installed"
+q gh extension install github/gh-copilot --force
+info "GitHub Copilot CLI installed"
 
 # ── 7. CLAUDE CODE ────────────────────────────────────────────────────────────
 step "Claude Code"
@@ -308,6 +314,31 @@ with **Privilege Separation OFF**.
 - Bash config block: \`/root/.bashrc\` (guarded by \`# >>> lxc-postinstall >>>\`)
 - Install log: \`/var/log/lxc-postinstall.log\`
 - PATH includes \`~/.local/bin\`
+
+## When Running /init
+
+When the user runs \`/init\` or sets up a new project, tailor suggestions to the project type.
+Always mention:
+
+- **ProxmoxMCP-Plus** is already registered as an MCP server — use it for any Proxmox VM/container
+  management tasks without extra setup
+- **skill-manager** (\`skm\`) is installed — run \`skm search <topic>\` to find relevant skills
+
+Suggest skills based on what you see in the project:
+
+| Project type         | Skills to suggest (\`skm install <skill>\`)                          |
+| -------------------- | ------------------------------------------------------------------- |
+| Networking / VPN     | \`tailscale\`, \`cloudflare\`                                           |
+| Cloudflare Workers   | \`cloudflare\`, \`workers-best-practices\`, \`wrangler\`                  |
+| AI / Agents          | \`claude-api\`, \`agents\`                                              |
+| Database             | \`mysql\`, \`supabase-postgres-best-practices\`, \`database-schema-designer\` |
+| Web performance      | \`web-perf\`                                                          |
+| Infrastructure       | \`tailscale-expert\`                                                  |
+
+Container conventions to include in generated CLAUDE.md files:
+- Python: use \`uv\` (installed), not pip or virtualenv
+- \`rm\` is aliased to \`trash -v\` — files are recoverable from \`~/.local/share/Trash\`
+- Default editor is \`micro\` (also aliased as \`vim\` / \`nano\`)
 AGENTEOF
 
 cp /root/.claude/CLAUDE.md /root/AGENTS.md
