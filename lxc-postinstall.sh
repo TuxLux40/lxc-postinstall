@@ -4,7 +4,7 @@ set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
+if [[ -f "$SCRIPT_DIR/.env" ]]; then set -a; source "$SCRIPT_DIR/.env"; set +a; fi
 
 # ── CONFIG ───────────────────────────────────────────────────────────────────
 PROXMOX_HOST="${PROXMOX_HOST:-}"
@@ -49,10 +49,15 @@ step() {
     echo -e "  ${BOLD}[${CURRENT_STEP}/${TOTAL_STEPS}]${NC} ${BLUE}$*${NC}  ${bar} ${DIM}${pct}%${NC}"
 }
 
+has() { command -v "$1" &>/dev/null; }
+ver() { "$@" 2>/dev/null || echo "not installed"; }
+
 # ── PRE-FLIGHT ───────────────────────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && die "Must run as root"
 
-DISTRO=$(. /etc/os-release && echo "$ID")
+. /etc/os-release
+DISTRO="${ID:-}"
+DISTRO_VER="${PRETTY_NAME:-$ID}"
 [[ -z "$DISTRO" ]] && die "Cannot detect distro from /etc/os-release"
 info "Distro: $DISTRO"
 
@@ -69,14 +74,7 @@ pkg() {
 step "Repos and system update"
 case "$DISTRO" in
 debian|ubuntu|linuxmint)
-    mkdir -p /etc/apt/keyrings
-    # Add gh CLI sources before nodesource script runs — its apt-get update picks up both
-    { curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        | gpg --dearmor > /etc/apt/keyrings/githubcli.gpg; } >>"$LOGFILE" 2>&1
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list
-    # nodesource setup script runs apt-get update internally (covers gh CLI too)
-    { curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1
+    q apt-get update -qq
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
 arch|manjaro)
@@ -95,10 +93,10 @@ debian|ubuntu|linuxmint)
     pkg curl wget git micro fish htop btop net-tools dnsutils tree bat \
         unzip tar ca-certificates gnupg lsb-release build-essential procps \
         trash-cli python3 python3-venv nodejs gh
-    if ! command -v fastfetch &>/dev/null; then
+    if ! has fastfetch; then
         { curl -sLo /tmp/ff.deb \
             https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb \
-        && q dpkg -i /tmp/ff.deb; } >>"$LOGFILE" 2>&1 || warn "fastfetch install failed (non-critical)"
+        && dpkg -i /tmp/ff.deb; } >>"$LOGFILE" 2>&1 || warn "fastfetch install failed (non-critical)"
         rm -f /tmp/ff.deb
     fi
     ;;
@@ -138,7 +136,7 @@ FFEOF
 
 # ── 3. UV ─────────────────────────────────────────────────────────────────────
 step "uv (Python package manager)"
-if ! command -v uv &>/dev/null; then
+if ! has uv; then
     { curl -LsSf https://astral.sh/uv/install.sh | sh; } >>"$LOGFILE" 2>&1
     info "uv installed"
 else
@@ -148,7 +146,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # ── 4. LINUTIL ────────────────────────────────────────────────────────────────
 step "Linutil"
-if ! command -v linutil &>/dev/null; then
+if ! has linutil; then
     { curl -fsSL "https://github.com/TuxLux40/linutil/releases/latest/download/linutil" \
         -o /tmp/linutil 2>/dev/null \
     || curl -fsSL "https://github.com/ChrisTitusTech/linutil/releases/latest/download/linutil" \
@@ -187,7 +185,7 @@ else
     q git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
     info "ProxmoxMCP-Plus cloned"
 fi
-(cd "$PMCP_DIR" && q uv venv && q uv pip install -e .)
+(cd "$PMCP_DIR" && { [[ -d .venv ]] || q uv venv; } && q uv pip install -e .)
 mkdir -p "$PMCP_DIR/proxmox-config"
 
 if [[ ! -f "$PMCP_DIR/proxmox-config/config.json" ]]; then
@@ -218,6 +216,7 @@ PMCPEOF
 fi
 
 mkdir -p /root/.config/Claude
+if [[ ! -f /root/.config/Claude/claude_desktop_config.json ]]; then
 cat > /root/.config/Claude/claude_desktop_config.json << MCPEOF
 {
     "mcpServers": {
@@ -232,17 +231,17 @@ cat > /root/.config/Claude/claude_desktop_config.json << MCPEOF
     }
 }
 MCPEOF
+fi
 warn "ProxmoxMCP: fill in token at $PMCP_DIR/proxmox-config/config.json"
 
 # ── 9. AGENT INSTRUCTIONS ────────────────────────────────────────────────────
 step "Agent instructions"
 CT_HOSTNAME=$(hostname 2>/dev/null || echo "unknown")
 CT_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
-NODE_VER=$(node --version 2>/dev/null || echo "not installed")
-UV_VER=$(uv --version 2>/dev/null || echo "not installed")
-NPM_VER=$(npm --version 2>/dev/null || echo "not installed")
+NODE_VER=$(ver node --version)
+UV_VER=$(ver uv --version)
+NPM_VER=$(ver npm --version)
 CLAUDE_VER=$(claude --version 2>/dev/null | head -1 || echo "not installed")
-DISTRO_VER=$(. /etc/os-release && echo "$PRETTY_NAME")
 
 mkdir -p /root/.claude
 

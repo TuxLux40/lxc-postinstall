@@ -35,7 +35,7 @@ Log output: `/var/log/lxc-postinstall.log`
 
 - **Runs inside the container**: no `pct exec` wrappers, no host-side checks
 - **Non-interactive**: no whiptail; all config via env vars or `.env`
-- **Repos first**: nodesource added before the main package install, so Node.js lands in the same `apt-get install` batch
+- **Distro packages only**: no external PPAs or repos — nodejs, npm, and gh are available in Debian 12+/Ubuntu/Arch/Fedora official repos
 - **Helpers**:
   - `q <cmd>` — run command, redirect stdout+stderr to logfile; print last 5 log lines on failure
   - `pkg <pkgs…>` — distro-agnostic install using `$DISTRO`
@@ -53,7 +53,7 @@ Log output: `/var/log/lxc-postinstall.log`
 
 ## What the script installs (in order)
 
-1. Repos + system update (nodesource added here for deb/fedora, then `apt-get upgrade`)
+1. System update (`apt-get update && upgrade` / `pacman -Syu` / `dnf upgrade`) — no external repos
 2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, bat, net-tools, build tools, python3/venv, nodejs
 3. `uv` (Python package manager via astral.sh); `export PATH` updated immediately after
 4. `linutil` (TuxLux40 fork, fallback to ChrisTitusTech)
