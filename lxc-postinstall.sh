@@ -32,7 +32,7 @@ q() {
     fi
 }
 
-TOTAL_STEPS=9
+TOTAL_STEPS=10
 CURRENT_STEP=0
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -233,7 +233,87 @@ cat > /root/.config/Claude/claude_desktop_config.json << MCPEOF
 MCPEOF
 warn "ProxmoxMCP: fill in token at $PMCP_DIR/proxmox-config/config.json"
 
-# ── 9. BASH ENVIRONMENT ───────────────────────────────────────────────────────
+# ── 9. AGENT INSTRUCTIONS ────────────────────────────────────────────────────
+step "Agent instructions"
+CT_HOSTNAME=$(hostname 2>/dev/null || echo "unknown")
+CT_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+NODE_VER=$(node --version 2>/dev/null || echo "not installed")
+UV_VER=$(uv --version 2>/dev/null || echo "not installed")
+NPM_VER=$(npm --version 2>/dev/null || echo "not installed")
+CLAUDE_VER=$(claude --version 2>/dev/null | head -1 || echo "not installed")
+DISTRO_VER=$(. /etc/os-release && echo "$PRETTY_NAME")
+
+mkdir -p /root/.claude
+
+cat > /root/.claude/CLAUDE.md << AGENTEOF
+# Container Context
+
+This is an LXC container running on Proxmox VE. Use this file for context when working inside this container.
+
+## Identity
+
+| Key      | Value                   |
+| -------- | ----------------------- |
+| Hostname | $CT_HOSTNAME            |
+| IP       | $CT_IP                  |
+| OS       | $DISTRO_VER             |
+| Node.js  | $NODE_VER               |
+| npm      | $NPM_VER                |
+| uv       | $UV_VER                 |
+| Claude   | $CLAUDE_VER             |
+
+## Proxmox Host
+
+| Key        | Value                          |
+| ---------- | ------------------------------ |
+| Host       | ${PROXMOX_HOST:-not configured} |
+| User       | $PROXMOX_USER                  |
+| Token name | $PROXMOX_TOKEN_NAME            |
+
+## MCP Servers
+
+### ProxmoxMCP-Plus
+Manages the Proxmox VE host via API from inside this container.
+
+- Repo: \`/opt/ProxmoxMCP-Plus\`
+- Config: \`/opt/ProxmoxMCP-Plus/proxmox-config/config.json\`
+- Venv: \`/opt/ProxmoxMCP-Plus/.venv\`
+- Registered in: \`/root/.config/Claude/claude_desktop_config.json\`
+
+If the token is not yet filled in, edit \`/opt/ProxmoxMCP-Plus/proxmox-config/config.json\`
+and set \`auth.token_value\`. Create the token in PVE → Datacenter → Permissions → API Tokens
+with **Privilege Separation OFF**.
+
+## Installed Tools
+
+| Tool           | Notes                                          |
+| -------------- | ---------------------------------------------- |
+| \`fish\`         | Interactive shell (type \`fish\` to enter)       |
+| \`micro\`        | Default editor; aliased as \`vim\` and \`nano\`    |
+| \`uv\`           | Python package manager (\`~/.local/bin/uv\`)     |
+| \`claude\`       | Claude Code CLI (\`~/.local/bin/claude\`)        |
+| \`skm\`          | Skill manager for Claude Code                  |
+| \`gh copilot\`   | GitHub Copilot CLI                             |
+| \`linutil\`      | Linux utility TUI (\`/usr/local/bin/linutil\`)  |
+| \`fastfetch\`    | System info on login                           |
+| \`btop\` / \`htop\`| Resource monitors                              |
+| \`bat\`          | Syntax-highlighted cat (may be \`batcat\` here)  |
+| \`trash\`        | Safe delete — \`rm\` is aliased to \`trash -v\`    |
+
+## Key Paths
+
+- Agent context (this file): \`/root/.claude/CLAUDE.md\` and \`/root/AGENTS.md\`
+- Claude MCP config: \`/root/.config/Claude/claude_desktop_config.json\`
+- ProxmoxMCP config: \`/opt/ProxmoxMCP-Plus/proxmox-config/config.json\`
+- Bash config block: \`/root/.bashrc\` (guarded by \`# >>> lxc-postinstall >>>\`)
+- Install log: \`/var/log/lxc-postinstall.log\`
+- PATH includes \`~/.local/bin\`
+AGENTEOF
+
+cp /root/.claude/CLAUDE.md /root/AGENTS.md
+info "Agent instructions written to /root/.claude/CLAUDE.md and /root/AGENTS.md"
+
+# ── 10. BASH ENVIRONMENT ──────────────────────────────────────────────────────
 step "Bash environment"
 if ! grep -Fq "# >>> lxc-postinstall >>>" /root/.bashrc 2>/dev/null; then
     cat >> /root/.bashrc << 'BASHEOF'
