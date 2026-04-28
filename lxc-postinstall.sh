@@ -70,18 +70,13 @@ step "Repos and system update"
 case "$DISTRO" in
 debian|ubuntu|linuxmint)
     mkdir -p /etc/apt/keyrings
-    # nodesource — manual key+sources so we control when apt-get update runs
-    { curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor > /etc/apt/keyrings/nodesource.gpg; } >>"$LOGFILE" 2>&1
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_lts.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list
-    # gh CLI
+    # Add gh CLI sources before nodesource script runs — its apt-get update picks up both
     { curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | gpg --dearmor > /etc/apt/keyrings/githubcli.gpg; } >>"$LOGFILE" 2>&1
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list
-    # One update covers all new repos
-    q apt-get update -qq
+    # nodesource setup script runs apt-get update internally (covers gh CLI too)
+    { curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
 arch|manjaro)
