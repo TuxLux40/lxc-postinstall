@@ -1,44 +1,38 @@
 #!/usr/bin/env bash
-# Proxmox LXC post-install — host-side orchestrator
-# Runs on the Proxmox host, configures selected LXC containers via pct exec.
+# Proxmox LXC post-install — run as root inside the container
 set -euo pipefail
-export LC_ALL=C
+export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 
-# ── LOAD .env (same dir as script) ───────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
 
-# ── CONFIG (env vars override defaults) ──────────────────────────────────────
-TS_AUTHKEY="${TS_AUTHKEY:-}"
+# ── CONFIG ───────────────────────────────────────────────────────────────────
 PROXMOX_HOST="${PROXMOX_HOST:-}"
 PROXMOX_USER="${PROXMOX_USER:-root@pam}"
 PROXMOX_TOKEN_NAME="${PROXMOX_TOKEN_NAME:-mcp-token}"
 PROXMOX_TOKEN_VALUE="${PROXMOX_TOKEN_VALUE:-}"
 
-# Ensure TERM is usable for whiptail/ncurses
-if ! infocmp "$TERM" &>/dev/null 2>&1; then
-    export TERM=xterm-256color
-fi
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+# ── COLORS + LOGGING ─────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[1;34m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 LOGFILE="/var/log/lxc-postinstall.log"
-: >"$LOGFILE"
+: > "$LOGFILE"
 
 info() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }
-die() {
-    echo -e "  ${RED}✗${NC} $*" >&2
-    exit 1
+die()  { echo -e "  ${RED}✗${NC} $*" >&2; exit 1; }
+
+# q: run a command, log output, print last 5 lines on failure
+q() {
+    if ! "$@" >>"$LOGFILE" 2>&1; then
+        echo -e "  ${RED}✗ Failed:${NC} $*"
+        tail -5 "$LOGFILE" | sed 's/^/    /' >&2
+        return 1
+    fi
 }
 
-TOTAL_STEPS=11
+TOTAL_STEPS=9
 CURRENT_STEP=0
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -57,170 +51,66 @@ step() {
 
 # ── PRE-FLIGHT ───────────────────────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && die "Must run as root"
-command -v pct &>/dev/null || die "pct not found — this script runs on a Proxmox host"
-[[ -d /etc/pve ]] || die "/etc/pve not found — not a Proxmox host"
 
-if ! command -v whiptail &>/dev/null; then
-    apt-get update -qq >>"$LOGFILE" 2>&1 || true
-    apt-get install -y whiptail >>"$LOGFILE" 2>&1 || die "Failed to install whiptail"
-fi
+DISTRO=$(. /etc/os-release && echo "$ID")
+[[ -z "$DISTRO" ]] && die "Cannot detect distro from /etc/os-release"
+info "Distro: $DISTRO"
 
-# ── UI HELPERS ───────────────────────────────────────────────────────────────
-ui_input() {
-    local title="$1" prompt="$2" default_value="$3" secret="${4:-0}" value
-    if [[ "$secret" -eq 1 ]]; then
-        value=$(whiptail --title "$title" --passwordbox "$prompt" 12 78 "$default_value" 3>&1 1>&2 2>&3) || die "Cancelled"
-    else
-        value=$(whiptail --title "$title" --inputbox "$prompt" 12 78 "$default_value" 3>&1 1>&2 2>&3) || die "Cancelled"
-    fi
-    printf '%s' "$value"
-}
-
-ui_confirm() {
-    local title="$1" prompt="$2" no_text="${3:-No}" yes_text="${4:-Yes}"
-    whiptail --title "$title" --yes-button "$yes_text" --no-button "$no_text" --yesno "$prompt" 20 78
-    return $?
-}
-
-ui_select_containers() {
-    local -a options=()
-    local vmid status name
-    while IFS='|' read -r vmid status name; do
-        [[ -z "$vmid" ]] && continue
-        options+=("$vmid" "$name [$status]" "OFF")
-    done < <(pct list | awk 'NR>1 {print $1"|"$2"|"$NF}')
-
-    [[ ${#options[@]} -eq 0 ]] && { warn "No containers found on this host"; return 1; }
-
-    local selected
-    selected=$(whiptail --title "Select Containers" --ok-button "Install" --cancel-button "Cancel" \
-        --checklist "Select containers to configure (SPACE to toggle, ENTER to confirm):" 20 90 10 \
-        "${options[@]}" 3>&1 1>&2 2>&3) || return 1
-    selected=${selected//\"/}
-    printf '%s\n' $selected
-}
-
-save_env() {
-    cat >"$SCRIPT_DIR/.env" <<EOF
-TS_AUTHKEY=$TS_AUTHKEY
-PROXMOX_HOST=$PROXMOX_HOST
-PROXMOX_USER=$PROXMOX_USER
-PROXMOX_TOKEN_NAME=$PROXMOX_TOKEN_NAME
-PROXMOX_TOKEN_VALUE=$PROXMOX_TOKEN_VALUE
-EOF
-    info "Saved settings to $SCRIPT_DIR/.env"
-}
-
-run_interactive_setup() {
-    TS_AUTHKEY=$(ui_input "Tailscale" "Enter TS_AUTHKEY (leave empty to skip auto-join)" "$TS_AUTHKEY" 1)
-    PROXMOX_HOST=$(ui_input "Proxmox" "Enter PROXMOX_HOST (IP or hostname)" "$PROXMOX_HOST")
-    PROXMOX_USER=$(ui_input "Proxmox" "Enter PROXMOX_USER" "$PROXMOX_USER")
-    PROXMOX_TOKEN_NAME=$(ui_input "Proxmox" "Enter PROXMOX_TOKEN_NAME" "$PROXMOX_TOKEN_NAME")
-    PROXMOX_TOKEN_VALUE=$(ui_input "Proxmox" "Enter PROXMOX_TOKEN_VALUE" "$PROXMOX_TOKEN_VALUE" 1)
-
-    if ui_confirm "Save Defaults" "Save these settings as defaults in .env for future runs?"; then
-        save_env
-    fi
-}
-
-# ── CONTAINER HELPERS (all run commands on $CTID via pct exec) ───────────────
-CTID=""
-DISTRO=""
-
-in_ct() { pct exec "$CTID" -- "$@"; }
-
-ct_quiet() {
-    if ! pct exec "$CTID" -- "$@" >>"$LOGFILE" 2>&1; then
-        echo -e "  ${RED}✗ Command failed in CTID $CTID:${NC} $1"
-        tail -5 "$LOGFILE" | sed 's/^/    /' >&2
-        return 1
-    fi
-}
-
-ct_sh() { pct exec "$CTID" -- bash -c "$1" >>"$LOGFILE" 2>&1; }
-
-ct_sh_quiet() {
-    if ! pct exec "$CTID" -- bash -c "$1" >>"$LOGFILE" 2>&1; then
-        echo -e "  ${RED}✗ Shell failed in CTID $CTID${NC}"
-        tail -5 "$LOGFILE" | sed 's/^/    /' >&2
-        return 1
-    fi
-}
-
-ct_has() { pct exec "$CTID" -- sh -c "command -v $1 >/dev/null"; }
-ct_test() { pct exec "$CTID" -- test "$@"; }
-
-detect_ct_distro() {
-    DISTRO=$(pct exec "$CTID" -- sh -c '. /etc/os-release && echo "$ID"')
-    [[ -z "$DISTRO" ]] && die "Cannot detect distro in CTID $CTID"
-}
-
-ct_pkg_install() {
+pkg() {
     case "$DISTRO" in
-    debian | ubuntu | linuxmint) ct_quiet apt-get install -y "$@" ;;
-    arch | manjaro) ct_quiet pacman -S --noconfirm "$@" ;;
-    fedora) ct_quiet dnf install -y "$@" ;;
-    *) die "Unsupported distro in CTID $CTID: $DISTRO" ;;
+    debian|ubuntu|linuxmint) q apt-get install -y --no-install-recommends "$@" ;;
+    arch|manjaro)             q pacman -S --noconfirm --needed "$@" ;;
+    fedora)                   q dnf install -y "$@" ;;
+    *) die "Unsupported distro: $DISTRO" ;;
     esac
 }
 
-# ── INSTALL STEPS (operate on $CTID) ─────────────────────────────────────────
-configure_container() {
-    CTID="$1"
-    CURRENT_STEP=0
+# ── 1. REPOS + SYSTEM UPDATE ─────────────────────────────────────────────────
+step "Repos and system update"
+case "$DISTRO" in
+debian|ubuntu|linuxmint)
+    # nodesource setup runs apt-get update internally — reuse that pass
+    { curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1
+    q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
+    ;;
+arch|manjaro)
+    q pacman -Syu --noconfirm
+    ;;
+fedora)
+    q dnf upgrade -y
+    { curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -; } >>"$LOGFILE" 2>&1 || \
+        warn "nodesource for fedora failed — will install nodejs from distro repo"
+    ;;
+esac
+info "System updated"
 
-    echo ""
-    echo -e "${BOLD}${BLUE}══ Configuring CTID $CTID ══${NC}"
-    if ! pct status "$CTID" 2>/dev/null | grep -q 'status: running'; then
-        warn "CTID $CTID is not running, skipping."
-        return 0
+# ── 2. BASE PACKAGES ─────────────────────────────────────────────────────────
+step "Base packages"
+case "$DISTRO" in
+debian|ubuntu|linuxmint)
+    pkg curl wget git micro fish htop btop net-tools dnsutils tree bat \
+        unzip tar ca-certificates gnupg lsb-release build-essential procps \
+        trash-cli python3 python3-venv nodejs
+    if ! command -v fastfetch &>/dev/null; then
+        { curl -sLo /tmp/ff.deb \
+            https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb \
+        && q dpkg -i /tmp/ff.deb; } >>"$LOGFILE" 2>&1 || warn "fastfetch install failed (non-critical)"
+        rm -f /tmp/ff.deb
     fi
+    ;;
+arch|manjaro)
+    pkg curl wget git micro fish fastfetch htop btop \
+        net-tools unzip tar base-devel tree bat trash-cli python nodejs npm
+    ;;
+fedora)
+    pkg curl wget git micro fish fastfetch htop btop \
+        net-tools unzip tar gcc tree bat trash-cli python3 nodejs npm
+    ;;
+esac
+info "Base packages installed"
 
-    detect_ct_distro
-    info "Detected distro: $DISTRO"
-
-    # 1. SYSTEM UPDATE
-    step "Updating system packages"
-    case "$DISTRO" in
-    debian | ubuntu | linuxmint)
-        ct_sh_quiet 'export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get upgrade -y -o Dpkg::Options::="--force-confold"'
-        ;;
-    arch | manjaro) ct_quiet pacman -Syu --noconfirm ;;
-    fedora) ct_quiet dnf upgrade -y ;;
-    esac
-    info "System up to date"
-
-    ct_has npm && { ct_sh 'npm update -g' && info "npm globals updated" || warn "npm update failed (non-critical)"; }
-    ct_has uv && { ct_sh 'uv self update' && info "uv updated" || warn "uv update failed (non-critical)"; }
-    ct_has pip3 && { ct_sh 'pip3 install --upgrade pip' && info "pip updated" || warn "pip update failed (non-critical)"; }
-
-    # 2. BASE PACKAGES
-    step "Installing base packages"
-    case "$DISTRO" in
-    debian | ubuntu | linuxmint)
-        ct_pkg_install curl wget git micro fish htop btop net-tools dnsutils tree bat \
-            unzip tar ca-certificates gnupg lsb-release build-essential procps \
-            trash-cli python3 python3-pip python3-venv
-        if ! ct_has fastfetch; then
-            ct_sh 'add-apt-repository -y ppa:zhangsongcui3371/fastfetch' ||
-                ct_sh_quiet 'curl -sLo /tmp/ff.deb https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb && dpkg -i /tmp/ff.deb && rm -f /tmp/ff.deb' || true
-        fi
-        ;;
-    arch | manjaro)
-        ct_pkg_install curl wget git micro fish fastfetch htop btop \
-            net-tools unzip tar base-devel tree bat trash-cli python python-pip
-        ;;
-    fedora)
-        ct_pkg_install curl wget git micro fish fastfetch htop btop \
-            net-tools unzip tar gcc tree bat trash-cli python3 python3-pip
-        ;;
-    esac
-    info "Base packages installed"
-
-    # fastfetch config
-    local ff_conf
-    ff_conf=$(mktemp)
-    cat >"$ff_conf" <<'FFEOF'
+mkdir -p /root/.config/fastfetch
+cat > /root/.config/fastfetch/config.jsonc << 'FFEOF'
 {
     "modules": [
         "title",
@@ -236,98 +126,71 @@ configure_container() {
         "memory",
         "disk",
         "localip",
-        {
-            "type": "command",
-            "key": "Tailscale IP",
-            "text": "tailscale ip -4 2>/dev/null || echo 'not connected'"
-        },
-        {
-            "type": "command",
-            "key": "Tailscale",
-            "text": "tailscale status --self=true 2>/dev/null | head -1 || echo 'not running'"
-        },
         "break",
         "colors"
     ]
 }
 FFEOF
-    in_ct mkdir -p /root/.config/fastfetch
-    pct push "$CTID" "$ff_conf" /root/.config/fastfetch/config.jsonc
-    rm -f "$ff_conf"
 
-    # 3. UV
-    step "Python package manager (uv)"
-    if ! ct_has uv; then
-        ct_sh_quiet 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-        info "uv installed"
-    else
-        info "uv already present"
-    fi
+# ── 3. UV ─────────────────────────────────────────────────────────────────────
+step "uv (Python package manager)"
+if ! command -v uv &>/dev/null; then
+    { curl -LsSf https://astral.sh/uv/install.sh | sh; } >>"$LOGFILE" 2>&1
+    info "uv installed"
+else
+    info "uv already present"
+fi
+export PATH="$HOME/.local/bin:$PATH"
 
-    # 4. NODE.JS
-    step "Node.js LTS"
-    if ! ct_has node; then
-        case "$DISTRO" in
-        debian | ubuntu | linuxmint)
-            ct_sh_quiet 'curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -'
-            ct_quiet apt-get install -y nodejs
-            ;;
-        arch | manjaro) ct_pkg_install nodejs npm ;;
-        fedora) ct_quiet dnf install -y nodejs npm ;;
-        esac
-        info "Node.js installed"
-    else
-        info "Node.js already present"
-    fi
+# ── 4. LINUTIL ────────────────────────────────────────────────────────────────
+step "Linutil"
+if ! command -v linutil &>/dev/null; then
+    { curl -fsSL "https://github.com/TuxLux40/linutil/releases/latest/download/linutil" \
+        -o /tmp/linutil 2>/dev/null \
+    || curl -fsSL "https://github.com/ChrisTitusTech/linutil/releases/latest/download/linutil" \
+        -o /tmp/linutil; } >>"$LOGFILE" 2>&1
+    install -m 755 /tmp/linutil /usr/local/bin/linutil
+    rm -f /tmp/linutil
+    info "linutil installed"
+else
+    info "linutil already present"
+fi
 
-    # 5. TAILSCALE (host-side community script: configures /dev/net/tun + installs)
-    step "Tailscale (via community script)"
-    bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/addon/add-tailscale-lxc.sh)" ||
-        warn "Tailscale addon failed or cancelled (non-critical)"
+# ── 5. NPM GLOBALS ────────────────────────────────────────────────────────────
+step "npm global packages"
+q npm install -g skill-manager
+info "skill-manager (skm) installed"
 
-    # 6. NPM GLOBALS
-    step "npm global packages"
-    ct_quiet npm install -g skill-manager
-    info "skill-manager (skm) installed"
+# ── 6. COPILOT CLI ────────────────────────────────────────────────────────────
+step "GitHub Copilot CLI"
+{ curl -fsSL https://gh.io/copilot-install -o /tmp/copilot-install.sh \
+&& yes y | bash /tmp/copilot-install.sh; } >>"$LOGFILE" 2>&1 || \
+    warn "Copilot CLI install failed (non-critical)"
+rm -f /tmp/copilot-install.sh
+info "Copilot CLI installed"
 
-    # 7. LINUTIL
-    step "Linutil"
-    if ! ct_has linutil; then
-        ct_sh_quiet 'curl -fsSL "https://github.com/TuxLux40/linutil/releases/latest/download/linutil" -o /tmp/linutil 2>/dev/null || curl -fsSL "https://github.com/ChrisTitusTech/linutil/releases/latest/download/linutil" -o /tmp/linutil; install -m 755 /tmp/linutil /usr/local/bin/linutil && rm -f /tmp/linutil'
-        info "linutil installed"
-    else
-        info "linutil already present"
-    fi
+# ── 7. CLAUDE CODE ────────────────────────────────────────────────────────────
+step "Claude Code"
+{ curl -fsSL https://claude.ai/install.sh | bash; } >>"$LOGFILE" 2>&1
+info "Claude Code installed"
 
-    # 8. COPILOT CLI
-    step "GitHub Copilot CLI"
-    ct_sh 'curl -fsSL https://gh.io/copilot-install -o /tmp/copilot-install.sh && yes y | bash /tmp/copilot-install.sh; rm -f /tmp/copilot-install.sh' || true
-    info "Copilot CLI installed"
+# ── 8. PROXMOXMCP-PLUS ────────────────────────────────────────────────────────
+step "ProxmoxMCP-Plus"
+PMCP_DIR="/opt/ProxmoxMCP-Plus"
+if [[ -d "$PMCP_DIR/.git" ]]; then
+    q git -C "$PMCP_DIR" pull --ff-only
+    info "ProxmoxMCP-Plus updated"
+elif [[ -d "$PMCP_DIR" ]]; then
+    warn "$PMCP_DIR exists but is not a git repo — skipping"
+else
+    q git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$PMCP_DIR"
+    info "ProxmoxMCP-Plus cloned"
+fi
+(cd "$PMCP_DIR" && q uv venv && q uv pip install -e .)
+mkdir -p "$PMCP_DIR/proxmox-config"
 
-    # 9. CLAUDE CODE
-    step "Claude Code"
-    ct_sh_quiet 'curl -fsSL https://claude.ai/install.sh | bash'
-    info "Claude Code installed"
-
-    # 10. PROXMOXMCP-PLUS
-    step "ProxmoxMCP-Plus"
-    local pmcp_dir="/opt/ProxmoxMCP-Plus"
-    if ct_test -d "$pmcp_dir/.git"; then
-        ct_quiet git -C "$pmcp_dir" pull --ff-only
-        info "ProxmoxMCP-Plus updated"
-    elif ct_test -d "$pmcp_dir"; then
-        warn "$pmcp_dir exists but is not a git repository — skipping"
-    else
-        ct_quiet git clone https://github.com/rodaddy/ProxmoxMCP-Plus.git "$pmcp_dir"
-        info "ProxmoxMCP-Plus cloned"
-    fi
-    ct_sh_quiet "cd $pmcp_dir && export PATH=\$HOME/.local/bin:\$PATH && uv venv && uv pip install -e '.[dev]'"
-    in_ct mkdir -p "$pmcp_dir/proxmox-config"
-
-    if ! ct_test -f "$pmcp_dir/proxmox-config/config.json"; then
-        local mcp_conf
-        mcp_conf=$(mktemp)
-        cat >"$mcp_conf" <<PMCPEOF
+if [[ ! -f "$PMCP_DIR/proxmox-config/config.json" ]]; then
+    cat > "$PMCP_DIR/proxmox-config/config.json" << PMCPEOF
 {
     "proxmox": {
         "host": "${PROXMOX_HOST:-YOUR_PROXMOX_HOST}",
@@ -351,40 +214,29 @@ FFEOF
     }
 }
 PMCPEOF
-        pct push "$CTID" "$mcp_conf" "$pmcp_dir/proxmox-config/config.json"
-        rm -f "$mcp_conf"
-    else
-        info "ProxmoxMCP config.json already exists, preserving."
-    fi
+fi
 
-    # Claude Code MCP config
-    in_ct mkdir -p /root/.config/Claude
-    local claude_mcp
-    claude_mcp=$(mktemp)
-    cat >"$claude_mcp" <<MCPEOF
+mkdir -p /root/.config/Claude
+cat > /root/.config/Claude/claude_desktop_config.json << MCPEOF
 {
     "mcpServers": {
         "ProxmoxMCP-Plus": {
-            "command": "${pmcp_dir}/.venv/bin/python",
+            "command": "${PMCP_DIR}/.venv/bin/python",
             "args": ["-m", "proxmox_mcp.server"],
             "env": {
-                "PYTHONPATH": "${pmcp_dir}/src",
-                "PROXMOX_MCP_CONFIG": "${pmcp_dir}/proxmox-config/config.json"
+                "PYTHONPATH": "${PMCP_DIR}/src",
+                "PROXMOX_MCP_CONFIG": "${PMCP_DIR}/proxmox-config/config.json"
             }
         }
     }
 }
 MCPEOF
-    pct push "$CTID" "$claude_mcp" /root/.config/Claude/claude_desktop_config.json
-    rm -f "$claude_mcp"
-    warn "ProxmoxMCP: fill in token at $pmcp_dir/proxmox-config/config.json"
+warn "ProxmoxMCP: fill in token at $PMCP_DIR/proxmox-config/config.json"
 
-    # 11. BASH ENVIRONMENT
-    step "Bash environment"
-    if ! ct_sh 'grep -Fq "# >>> lxc-postinstall >>>" /root/.bashrc 2>/dev/null'; then
-        local bashrc_addon
-        bashrc_addon=$(mktemp)
-        cat >"$bashrc_addon" <<'EOF'
+# ── 9. BASH ENVIRONMENT ───────────────────────────────────────────────────────
+step "Bash environment"
+if ! grep -Fq "# >>> lxc-postinstall >>>" /root/.bashrc 2>/dev/null; then
+    cat >> /root/.bashrc << 'BASHEOF'
 
 # >>> lxc-postinstall >>>
 
@@ -432,6 +284,9 @@ alias lk='ls -lSrh'
 alias lt='ls -ltrh'
 alias lr='ls -lRh'
 
+# ── bat alias (Debian/Ubuntu install binary as batcat) ────────────────────────
+command -v batcat &>/dev/null && alias bat='batcat'
+
 # ── safe defaults ─────────────────────────────────────────────────────────────
 alias rm='trash -v'
 alias cp='cp -i'
@@ -467,7 +322,6 @@ alias 644='chmod -R 644'
 
 # ── tools ─────────────────────────────────────────────────────────────────────
 alias g='git'
-alias ts='tailscale'
 alias sm='skm'
 alias grep='grep --color=auto'
 alias diff='diff --color=auto'
@@ -492,52 +346,11 @@ export PATH="$HOME/.local/bin:$PATH"
     && source /usr/share/bash-completion/bash_completion
 
 # <<< lxc-postinstall <<<
-EOF
-        pct push "$CTID" "$bashrc_addon" /tmp/lxc-bashrc-addon
-        ct_sh_quiet 'cat /tmp/lxc-bashrc-addon >> /root/.bashrc && rm -f /tmp/lxc-bashrc-addon'
-        rm -f "$bashrc_addon"
-        info "Bash environment added"
-    else
-        info "Bash environment already present, skipping."
-    fi
-
-    info "CTID $CTID configuration complete"
-}
-
-# ── MAIN ─────────────────────────────────────────────────────────────────────
-whiptail --title "LXC Post-Install" --msgbox \
-    "Configure selected LXC containers with:\n\n\
- • System update\n\
- • Base packages (fish, micro, fastfetch, bat, btop, …)\n\
- • uv, Node.js LTS\n\
- • Tailscale (via community script)\n\
- • linutil, Copilot CLI, Claude Code\n\
- • ProxmoxMCP-Plus\n\
- • Bash environment tuning\n\n\
-Log: $LOGFILE" 20 70
-
-# Config wizard
-if [[ -f "$SCRIPT_DIR/.env" ]] && [[ -s "$SCRIPT_DIR/.env" ]]; then
-    if ui_confirm "Stored Config" "Found existing .env with saved settings.\n\nReconfigure values?" "Keep current values"; then
-        run_interactive_setup
-    else
-        info "Using stored .env values"
-    fi
+BASHEOF
+    info "Bash environment added"
 else
-    run_interactive_setup
+    info "Bash environment already present, skipping"
 fi
-
-# Container selection
-mapfile -t TARGET_CTIDS < <(ui_select_containers)
-[[ ${#TARGET_CTIDS[@]} -eq 0 ]] && die "No containers selected"
-
-# Configure each selected container
-for ctid in "${TARGET_CTIDS[@]}"; do
-    [[ -z "$ctid" ]] && continue
-    if ! configure_container "$ctid"; then
-        warn "Setup failed in CTID $ctid (continuing with next)"
-    fi
-done
 
 # ── DONE ─────────────────────────────────────────────────────────────────────
 echo ""
@@ -545,18 +358,12 @@ echo -e "${GREEN}  ╔═══════════════════�
 echo -e "${GREEN}  ║         LXC post-install complete            ║${NC}"
 echo -e "${GREEN}  ╚══════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${BOLD}Configured ${#TARGET_CTIDS[@]} container(s)${NC}"
-echo -e "  ${DIM}Log${NC}  $LOGFILE"
+echo -e "  ${DIM}Log:${NC} $LOGFILE"
 echo ""
-warn "Reopen shells in containers to activate bash config"
-warn "Fill in PROXMOX_TOKEN_VALUE in each container at /opt/ProxmoxMCP-Plus/proxmox-config/config.json"
+warn "Reopen shell to activate bash config"
+warn "Fill in PROXMOX_TOKEN_VALUE at $PMCP_DIR/proxmox-config/config.json"
 
-# Optional: upload log to 0x0.st
-if [[ -s "$LOGFILE" ]] && ui_confirm "Upload log" "Upload install log to 0x0.st?\n\nThe log contains only package manager output — no passwords or tokens.\nThe paste URL is unlisted and auto-expires."; then
+if [[ -s "$LOGFILE" ]]; then
     PASTE_URL=$(curl -fsSL -F "file=@${LOGFILE}" https://0x0.st 2>/dev/null) || true
-    if [[ -n "${PASTE_URL:-}" ]]; then
-        info "Log uploaded: ${PASTE_URL}"
-    else
-        warn "Log upload failed"
-    fi
+    if [[ -n "${PASTE_URL:-}" ]]; then info "Log: ${PASTE_URL}"; else warn "Log upload failed"; fi
 fi

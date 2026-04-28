@@ -1,77 +1,45 @@
 # lxc-postinstall
 
-Bootstrap script for Proxmox LXC containers.
+Bootstrap script for Proxmox LXC containers. Run as root **inside** the container.
 
-This repository contains a single root-only script, [lxc-postinstall.sh](lxc-postinstall.sh), that performs post-install setup across supported Linux distributions.
-
-## Install One-Liner
+## One-Liner
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh)
 ```
 
-Optional with environment variables in one command:
+With Proxmox MCP credentials pre-filled:
 
 ```bash
-TIMEZONE=Europe/Berlin LOCALE=de_DE.UTF-8 TS_AUTHKEY=... PROXMOX_HOST=... PROXMOX_USER=root@pam PROXMOX_TOKEN_NAME=mcp-token PROXMOX_TOKEN_VALUE=... bash <(curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh)
+PROXMOX_HOST=192.168.1.1 PROXMOX_TOKEN_VALUE=xxx bash <(curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh)
 ```
 
-## Interactive Mode
+## What it installs
 
-By default (when run in a TTY), the script opens an interactive flow where you can:
-
-- Set `TIMEZONE`, `LOCALE`, `TS_AUTHKEY`, and Proxmox MCP credentials
-- On a Proxmox host, choose target containers (CTIDs) and run setup in batch
-
-You can disable prompts for automation:
-
-```bash
-sudo bash lxc-postinstall.sh --non-interactive
-```
+System update → base packages → uv → linutil → skill-manager → Copilot CLI → Claude Code → ProxmoxMCP-Plus → bash environment
 
 ## Prerequisites
 
-- Run inside an LXC container where you want the setup applied
-- Root privileges
-- Internet access for package and tool downloads
-- Supported distributions:
-  - Debian
-  - Ubuntu
-  - Linux Mint
-  - Arch Linux
-  - Manjaro
-  - Fedora
-
-## Quickstart
-
-```bash
-cp .env.example .env
-micro .env
-sudo bash lxc-postinstall.sh
-```
-
-The script automatically loads `.env` from the repository directory.
+- Root access inside the container
+- Internet access
+- Supported distros: Debian, Ubuntu, Linux Mint, Arch, Manjaro, Fedora
 
 ## Configuration
 
-All configuration is environment-driven via `.env`.
+Pass env vars inline (see one-liner above) or create `.env` beside the script:
 
-For complete variable details, defaults, and behavior, see [CLAUDE.md](CLAUDE.md).
+```bash
+cp .env.example .env
+# edit .env, then:
+sudo bash lxc-postinstall.sh
+```
 
-## Security Notes
-
-- Do not commit `.env` with real credentials or tokens.
-- Keep secret values empty in `.env.example`.
-- The script enables Tailscale SSH (`tailscale set --ssh`) when a Tailscale auth key is provided.
+After running, fill in `PROXMOX_TOKEN_VALUE` at `/opt/ProxmoxMCP-Plus/proxmox-config/config.json`.  
+Create the token in PVE → Datacenter → Permissions → API Tokens with **Privilege Separation OFF**.
 
 ## Validation
 
 ```bash
 bash -n lxc-postinstall.sh
-```
-
-Optional (if installed):
-
-```bash
-shellcheck lxc-postinstall.sh
+shellcheck lxc-postinstall.sh   # optional
 ```

@@ -4,76 +4,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Host-only bash script (`lxc-postinstall.sh`) for bootstrapping Proxmox LXC containers. Runs on the Proxmox host as root. Selects containers via whiptail and configures each one via `pct exec` / `pct push`. Containers can be Debian/Ubuntu/Mint, Arch/Manjaro, or Fedora.
+Single bash script (`lxc-postinstall.sh`) that bootstraps Proxmox LXC containers. Runs **as root inside the container** (not host-side). Supports Debian/Ubuntu/Mint, Arch/Manjaro, and Fedora.
 
 ## Running the script
 
 ```bash
-# Copy and fill env template first (optional — the script also prompts via whiptail)
-cp .env.example .env && micro .env
+# One-liner inside any supported container
+bash <(curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh)
 
-# Then run as root on the Proxmox host
+# With credentials pre-filled
+PROXMOX_HOST=192.168.1.1 PROXMOX_TOKEN_VALUE=xxx bash <(curl -fsSL ...)
+
+# Or locally with .env
+cp .env.example .env && micro .env
 sudo bash lxc-postinstall.sh
 ```
 
-The script sources `.env` from its own directory at startup — no export needed, `set -a` handles it. Same values can also be entered interactively via whiptail and saved to `.env`.
+The script sources `.env` from its own directory at startup — `set -a` handles export.
+
+## Validation
+
+```bash
+bash -n lxc-postinstall.sh        # syntax check (run before every commit)
+shellcheck lxc-postinstall.sh     # optional
+```
+
+Log output: `/var/log/lxc-postinstall.log`
 
 ## Architecture
 
-- **Host-only**: script refuses to run if `pct` or `/etc/pve` are missing
-- **Per-container loop**: for each selected CTID, `configure_container()` runs all 11 install steps via `pct exec` helpers
-- **Helpers** (inside `configure_container`, operate on `$CTID`):
-  - `in_ct <cmd>` — run a command
-  - `ct_quiet <cmd>` — run and log, fail container setup on error (skips to next CTID)
-  - `ct_sh '<shell snippet>'` / `ct_sh_quiet` — for pipelines/heredocs
-  - `ct_has <bin>` — check if a command exists
-  - `ct_test <test-args>` — `test` wrapper for file/dir checks
-  - `ct_pkg_install <pkgs…>` — distro-agnostic install using `$DISTRO`
-- **File pushes**: build configs on host to a tmpfile, then `pct push "$CTID" tmpfile /target/path`
-- **Tailscale**: delegated to `community-scripts/ProxmoxVE` addon (runs host-side, configures `/dev/net/tun` in the container's LXC config)
+- **Runs inside the container**: no `pct exec` wrappers, no host-side checks
+- **Non-interactive**: no whiptail; all config via env vars or `.env`
+- **Repos first**: nodesource added before the main package install, so Node.js lands in the same `apt-get install` batch
+- **Helpers**:
+  - `q <cmd>` — run command, redirect stdout+stderr to logfile; print last 5 log lines on failure
+  - `pkg <pkgs…>` — distro-agnostic install using `$DISTRO`
+- **File writes**: configs written directly (no `pct push`)
+- **Log upload**: at completion, log is uploaded to `0x0.st` automatically
 
 ## Config variables
 
 | Var                   | Default     | Purpose                                   |
 | --------------------- | ----------- | ----------------------------------------- |
-| `TS_AUTHKEY`          | _(empty)_   | Tailscale auto-join; skip if unset        |
 | `PROXMOX_HOST`        | _(empty)_   | ProxmoxMCP-Plus config.json               |
 | `PROXMOX_USER`        | `root@pam`  | ProxmoxMCP-Plus auth                      |
 | `PROXMOX_TOKEN_NAME`  | `mcp-token` | ProxmoxMCP-Plus auth                      |
-| `PROXMOX_TOKEN_VALUE` | _(empty)_   | ProxmoxMCP-Plus auth — must fill manually |
+| `PROXMOX_TOKEN_VALUE` | _(empty)_   | ProxmoxMCP-Plus auth — fill after install |
 
-## What the script installs (per container, in order)
+## What the script installs (in order)
 
-1. System update
-2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, bat, net-tools, build tools, python3/pip/venv
-3. `uv` (Python package manager via astral.sh)
-4. Node.js LTS (nodesource for Debian/Ubuntu)
-5. Tailscale via community-scripts addon (host-side, adds `/dev/net/tun`)
-6. npm globals: `skill-manager`
-7. `linutil` (TuxLux40 fork, fallback to ChrisTitusTech)
-8. GitHub Copilot CLI
-9. Claude Code
-10. ProxmoxMCP-Plus → `/opt/ProxmoxMCP-Plus` with uv venv; writes `proxmox-config/config.json` and Claude Code MCP config to `/root/.config/Claude/claude_desktop_config.json`
-11. Bash environment (appended to `/root/.bashrc`)
+1. Repos + system update (nodesource added here for deb/fedora, then `apt-get upgrade`)
+2. Base packages: curl, wget, git, micro, fish, fastfetch, htop, btop, bat, net-tools, build tools, python3/venv, nodejs
+3. `uv` (Python package manager via astral.sh); `export PATH` updated immediately after
+4. `linutil` (TuxLux40 fork, fallback to ChrisTitusTech)
+5. npm globals: `skill-manager`
+6. GitHub Copilot CLI
+7. Claude Code
+8. ProxmoxMCP-Plus → `/opt/ProxmoxMCP-Plus` with uv venv; writes `proxmox-config/config.json` and MCP config to `/root/.config/Claude/claude_desktop_config.json`
+9. Bash environment (appended to `/root/.bashrc`)
 
 ## Adding new steps
 
-Inside `configure_container()`, add a new block between the existing steps:
+Inside the script, add a new block using the section comment pattern:
 
 ```bash
+# ── 10. MY STEP ──────────────────────────────────────────────────────────────
 step "My new step"
-if ! ct_has mytool; then
-    ct_sh_quiet 'curl -fsSL … | bash'
+if ! command -v mytool &>/dev/null; then
+    { curl -fsSL … | bash; } >>"$LOGFILE" 2>&1
     info "mytool installed"
 fi
 ```
 
-Use `ct_pkg_install` for distro-agnostic package installs. Check `$DISTRO` only when package names differ. Bump `TOTAL_STEPS` at the top of the file to keep the progress bar accurate.
+Bump `TOTAL_STEPS` at the top. Use `pkg` for distro-agnostic installs; check `$DISTRO` only when package names differ.
+
+## Conventions
+
+- **Env defaults**: centralize all defaults in the `# ── CONFIG ──` block; never scatter them in the script body
+- **Distro branches**: always use `debian|ubuntu|linuxmint`, `arch|manjaro`, `fedora` — keep all three consistent
+- **Piped installs**: wrap in `{ curl … | bash; } >>"$LOGFILE" 2>&1` to capture both curl stderr and installer output
+- **Non-critical steps**: append `|| warn "… (non-critical)"` — don't let optional tools abort the run
+- **Bashrc idempotency**: `grep -Fq "# >>> lxc-postinstall >>>"` guard prevents duplicate appends
+- **`.env.example`**: update alongside the script's CONFIG block when adding new vars; keep secrets empty
 
 ## .env tracking
 
-`.env` itself is gitignored (only `*.log` is explicitly ignored, but `.env` was removed from tracking intentionally — see commit `6066d0e`). `.env.example` is the tracked template. Never commit real `.env`.
+`.env` is gitignored. `.env.example` is the tracked template. Never commit real credentials.
 
 ## ProxmoxMCP token
 
-After running, fill in `PROXMOX_TOKEN_VALUE` inside each container at `/opt/ProxmoxMCP-Plus/proxmox-config/config.json`. Create the token in PVE → Datacenter → Permissions → API Tokens with Privilege Separation OFF.
+After running, fill in `PROXMOX_TOKEN_VALUE` at `/opt/ProxmoxMCP-Plus/proxmox-config/config.json`.  
+Create the token in PVE → Datacenter → Permissions → API Tokens with **Privilege Separation OFF**.
