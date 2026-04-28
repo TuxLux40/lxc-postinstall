@@ -317,28 +317,28 @@ with **Privilege Separation OFF**.
 
 ## When Running /init
 
-When the user runs \`/init\` or sets up a new project, tailor suggestions to the project type.
-Always mention:
+Before generating a CLAUDE.md, **investigate this container to understand its actual purpose**.
+Do not guess from the hostname alone — inspect the environment:
 
-- **ProxmoxMCP-Plus** is already registered as an MCP server — use it for any Proxmox VM/container
-  management tasks without extra setup
-- **skill-manager** (\`skm\`) is installed — run \`skm search <topic>\` to find relevant skills
+1. \`systemctl list-units --type=service --state=running 2>/dev/null\` — running services
+2. \`ss -tlnp\` — open ports and what's listening
+3. Contents of the current directory and any obvious config files
+4. \`pip list\`, \`npm list -g\`, \`uv pip list\` — installed packages
+5. Any cron jobs: \`crontab -l 2>/dev/null\`
 
-Suggest skills based on what you see in the project:
+Based on what you find, **suggest additional tools, MCP servers, and skills that are NOT already
+installed** and are specific to this container's workload. Do not repeat what is already in the
+Installed Tools table above.
 
-| Project type         | Skills to suggest (\`skm install <skill>\`)                          |
-| -------------------- | ------------------------------------------------------------------- |
-| Networking / VPN     | \`tailscale\`, \`cloudflare\`                                           |
-| Cloudflare Workers   | \`cloudflare\`, \`workers-best-practices\`, \`wrangler\`                  |
-| AI / Agents          | \`claude-api\`, \`agents\`                                              |
-| Database             | \`mysql\`, \`supabase-postgres-best-practices\`, \`database-schema-designer\` |
-| Web performance      | \`web-perf\`                                                          |
-| Infrastructure       | \`tailscale-expert\`                                                  |
+To find relevant Claude Code skills: run \`skm search <topic>\` (e.g. \`skm search email\`,
+\`skm search database\`, \`skm search monitoring\`). Search npm and GitHub for relevant MCP servers.
 
-Container conventions to include in generated CLAUDE.md files:
-- Python: use \`uv\` (installed), not pip or virtualenv
-- \`rm\` is aliased to \`trash -v\` — files are recoverable from \`~/.local/share/Trash\`
-- Default editor is \`micro\` (also aliased as \`vim\` / \`nano\`)
+Always include in the generated CLAUDE.md:
+- What this container does (derived from your investigation)
+- The ProxmoxMCP-Plus MCP server is already registered and available
+- Python: use \`uv\`, not pip or virtualenv
+- \`rm\` is aliased to \`trash -v\` — files go to \`~/.local/share/Trash\`, not deleted
+- Default editor: \`micro\` (also aliased as \`vim\` / \`nano\`)
 AGENTEOF
 
 cp /root/.claude/CLAUDE.md /root/AGENTS.md
