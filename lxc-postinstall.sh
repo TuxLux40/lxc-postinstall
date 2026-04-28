@@ -74,9 +74,10 @@ pkg() {
 step "Repos and system update"
 case "$DISTRO" in
 debian|ubuntu|linuxmint)
-    rm -f /etc/apt/sources.list.d/nodesource.list \
+    rm -f /etc/apt/sources.list.d/nodesource* \
           /etc/apt/sources.list.d/github-cli.list \
-          /etc/apt/keyrings/githubcli.gpg
+          /etc/apt/keyrings/githubcli.gpg \
+          /usr/share/keyrings/nodesource.gpg
     q apt-get update -qq
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
