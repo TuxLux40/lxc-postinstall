@@ -286,10 +286,6 @@ Manages the Proxmox VE host via API from inside this container.
 - Venv: \`/opt/ProxmoxMCP-Plus/.venv\`
 - Registered in: \`/root/.config/Claude/claude_desktop_config.json\`
 
-If the token is not yet filled in, edit \`/opt/ProxmoxMCP-Plus/proxmox-config/config.json\`
-and set \`auth.token_value\`. Create the token in PVE → Datacenter → Permissions → API Tokens
-with **Privilege Separation OFF**.
-
 ## Installed Tools
 
 | Tool           | Notes                                          |
@@ -315,27 +311,27 @@ with **Privilege Separation OFF**.
 - Install log: \`/var/log/lxc-postinstall.log\`
 - PATH includes \`~/.local/bin\`
 
-## When Running /init
+## Project Initialization Guidance
 
-Before generating a CLAUDE.md, **investigate this container to understand its actual purpose**.
-Do not guess from the hostname alone — inspect the environment:
+When setting up project context for any new task, **investigate this container first** to
+understand what it actually does. Do not assume from the hostname alone:
 
 1. \`systemctl list-units --type=service --state=running 2>/dev/null\` — running services
 2. \`ss -tlnp\` — open ports and what's listening
-3. Contents of the current directory and any obvious config files
+3. Contents of the working directory and any obvious config files
 4. \`pip list\`, \`npm list -g\`, \`uv pip list\` — installed packages
-5. Any cron jobs: \`crontab -l 2>/dev/null\`
+5. \`crontab -l 2>/dev/null\` — scheduled jobs
 
-Based on what you find, **suggest additional tools, MCP servers, and skills that are NOT already
-installed** and are specific to this container's workload. Do not repeat what is already in the
-Installed Tools table above.
+Based on what you find, **recommend additional tools, MCP servers, and agent skills that are
+NOT already installed** and are relevant to this container's actual workload. Do not repeat
+tools already listed in the Installed Tools table above.
 
-To find relevant Claude Code skills: run \`skm search <topic>\` (e.g. \`skm search email\`,
-\`skm search database\`, \`skm search monitoring\`). Search npm and GitHub for relevant MCP servers.
+To discover agent skills: \`skm search <topic>\` (e.g. \`skm search email\`, \`skm search database\`).
+Also search npm (\`npm search mcp <topic>\`) and GitHub for relevant MCP servers.
 
-Always include in the generated CLAUDE.md:
-- What this container does (derived from your investigation)
-- The ProxmoxMCP-Plus MCP server is already registered and available
+Always include in any generated project context file:
+- What this container does (from your investigation, not the hostname)
+- ProxmoxMCP-Plus MCP server is already registered and usable
 - Python: use \`uv\`, not pip or virtualenv
 - \`rm\` is aliased to \`trash -v\` — files go to \`~/.local/share/Trash\`, not deleted
 - Default editor: \`micro\` (also aliased as \`vim\` / \`nano\`)
