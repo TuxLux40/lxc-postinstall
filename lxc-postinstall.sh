@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=41
+REVISION=43
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -197,7 +197,7 @@ fi
 # ── 7. CLAUDE CODE ────────────────────────────────────────────────────────────
 step "Claude Code"
 if ! has claude; then
-    ( curl -fsSL https://claude.ai/install.sh | bash ) >>"$LOGFILE" 2>&1
+    q npm install -g @anthropic-ai/claude-code
     info "Claude Code installed"
 else
     info "Claude Code already present"
