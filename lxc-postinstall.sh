@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=47
+REVISION=48
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -80,8 +80,8 @@ debian|ubuntu|linuxmint)
           /etc/apt/sources.list.d/github-cli.list \
           /etc/apt/keyrings/githubcli.gpg \
           /usr/share/keyrings/nodesource.gpg
-    apt-get remove --purge -y nodejs npm 2>/dev/null || true
-    apt-get autoremove -y 2>/dev/null || true
+    apt-get remove --purge -y nodejs npm >>"$LOGFILE" 2>&1 || true
+    apt-get autoremove -y >>"$LOGFILE" 2>&1 || true
     q apt-get update -qq
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
@@ -177,21 +177,13 @@ fi
 
 # ── 6. COPILOT CLI ────────────────────────────────────────────────────────────
 step "GitHub Copilot CLI"
-COPILOT_EXT="$HOME/.local/share/gh/extensions/gh-copilot"
-if [[ ! -x "$COPILOT_EXT/gh-copilot" ]]; then
-    mkdir -p "$COPILOT_EXT"
-    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-    COPILOT_URL=$(curl -fsSL 2>/dev/null \
-        "https://api.github.com/repos/github/gh-copilot/releases/latest" \
-        | grep -m1 "browser_download_url.*linux.*${ARCH}" | cut -d'"' -f4 || true)
-    if [[ -n "$COPILOT_URL" ]]; then
-        { curl -fsSL "$COPILOT_URL" -o "$COPILOT_EXT/gh-copilot" \
-            && chmod +x "$COPILOT_EXT/gh-copilot"; } >>"$LOGFILE" 2>&1 \
-            || warn "GitHub Copilot CLI download failed (non-critical)"
-        info "GitHub Copilot CLI installed"
-    else
-        warn "GitHub Copilot CLI: release URL not found (non-critical)"
-    fi
+if ! has copilot; then
+    ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
+    { curl -fsSL "https://github.com/github/copilot-cli/releases/latest/download/copilot-linux-${ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin/ \
+        && chmod +x /usr/local/bin/copilot; } >>"$LOGFILE" 2>&1 \
+        || warn "GitHub Copilot CLI download failed (non-critical)"
+    info "GitHub Copilot CLI installed"
 else
     info "GitHub Copilot CLI already present"
 fi
