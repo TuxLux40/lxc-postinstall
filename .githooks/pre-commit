@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+FILE="lxc-postinstall.sh"
+if git diff --cached --name-only | grep -q "^${FILE}$"; then
+    current=$(grep -m1 '^REVISION=' "$FILE" | cut -d= -f2)
+    new=$((current + 1))
+    sed -i "s/^REVISION=${current}$/REVISION=${new}/" "$FILE"
+    git add "$FILE"
+fi
