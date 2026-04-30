@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=1
+REVISION=2
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
