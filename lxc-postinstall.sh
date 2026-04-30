@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=39
+REVISION=40
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -166,8 +166,12 @@ fi
 
 # ── 5. NPM GLOBALS ────────────────────────────────────────────────────────────
 step "npm global packages"
-q npm install -g skill-manager
-info "skill-manager (skm) installed"
+if ! has skm; then
+    q npm install -g skill-manager
+    info "skill-manager (skm) installed"
+else
+    info "skill-manager (skm) already present"
+fi
 
 # ── 6. COPILOT CLI ────────────────────────────────────────────────────────────
 step "GitHub Copilot CLI"
@@ -494,7 +498,7 @@ if ! has tailscale; then
 else
     info "tailscale already present"
 fi
-q systemctl enable --now tailscaled
+systemctl enable --now tailscaled >>"$LOGFILE" 2>&1 || warn "tailscaled service start failed (non-critical)"
 
 # ── DONE ─────────────────────────────────────────────────────────────────────
 echo ""
