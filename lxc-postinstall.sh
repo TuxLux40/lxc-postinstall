@@ -33,7 +33,7 @@ q() {
     fi
 }
 
-TOTAL_STEPS=10
+TOTAL_STEPS=11
 CURRENT_STEP=0
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -474,6 +474,22 @@ else
     info "Bash environment already present, skipping"
 fi
 
+# ── 11. TAILSCALE ────────────────────────────────────────────────────────────
+step "Tailscale"
+if ! has tailscale; then
+    case "$DISTRO" in
+    arch|manjaro)
+        pkg tailscale
+        ;;
+    *)
+        { curl -fsSL https://tailscale.com/install.sh | sh; } >>"$LOGFILE" 2>&1
+        ;;
+    esac
+    info "tailscale installed"
+else
+    info "tailscale already present"
+fi
+
 # ── DONE ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}  ╔══════════════════════════════════════════════╗${NC}"
@@ -485,7 +501,4 @@ echo ""
 warn "Reopen shell to activate bash config"
 warn "Fill in PROXMOX_TOKEN_VALUE at $PMCP_DIR/proxmox-config/config.json"
 
-if [[ -s "$LOGFILE" ]]; then
-    PASTE_URL=$(curl -fsSL -F "file=@${LOGFILE}" https://0x0.st 2>/dev/null) || true
-    if [[ -n "${PASTE_URL:-}" ]]; then info "Log: ${PASTE_URL}"; else warn "Log upload failed"; fi
-fi
+warn "Run 'tailscale up' to connect to your tailnet"
