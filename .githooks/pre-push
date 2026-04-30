@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
-RAW="https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh"
-echo "  Purging GitHub CDN cache..."
-curl -s -X PURGE "$RAW" >/dev/null || true
+# GitHub raw CDN propagates within ~60s; PURGE returns 401 so we skip it.
+# Instead, show the local revision so you can verify after push.
+LOCAL_REV=$(grep "^REVISION=" lxc-postinstall.sh | cut -d= -f2)
+echo "  Pushed rev ${LOCAL_REV} — CDN propagates within ~60s"
+echo "  Verify: curl -fsSL https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh | grep ^REVISION"
