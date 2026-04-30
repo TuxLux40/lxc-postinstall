@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=2
+REVISION=3
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -494,6 +494,7 @@ if ! has tailscale; then
 else
     info "tailscale already present"
 fi
+q systemctl enable --now tailscaled
 
 # ── DONE ─────────────────────────────────────────────────────────────────────
 echo ""
