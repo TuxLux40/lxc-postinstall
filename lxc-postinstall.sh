@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=46
+REVISION=47
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -80,6 +80,8 @@ debian|ubuntu|linuxmint)
           /etc/apt/sources.list.d/github-cli.list \
           /etc/apt/keyrings/githubcli.gpg \
           /usr/share/keyrings/nodesource.gpg
+    apt-get remove --purge -y nodejs npm 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
     q apt-get update -qq
     q apt-get upgrade -y -o Dpkg::Options::="--force-confold"
     ;;
@@ -98,7 +100,7 @@ case "$DISTRO" in
 debian|ubuntu|linuxmint)
     pkg curl wget git micro fish htop btop net-tools dnsutils tree bat \
         unzip tar ca-certificates gnupg lsb-release build-essential procps \
-        trash-cli python3 python3-venv nodejs npm gh
+        trash-cli python3 python3-venv nodejs npm
     if ! has fastfetch; then
         { curl -sLo /tmp/ff.deb \
             https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb \
