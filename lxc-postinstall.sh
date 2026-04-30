@@ -191,8 +191,12 @@ fi
 
 # ── 7. CLAUDE CODE ────────────────────────────────────────────────────────────
 step "Claude Code"
-{ curl -fsSL https://claude.ai/install.sh | bash; } >>"$LOGFILE" 2>&1
-info "Claude Code installed"
+if ! has claude; then
+    { curl -fsSL https://claude.ai/install.sh | bash; } >>"$LOGFILE" 2>&1
+    info "Claude Code installed"
+else
+    info "Claude Code already present"
+fi
 
 # ── 8. PROXMOXMCP-PLUS ────────────────────────────────────────────────────────
 step "ProxmoxMCP-Plus"
@@ -253,7 +257,7 @@ cat > /root/.config/Claude/claude_desktop_config.json << MCPEOF
 }
 MCPEOF
 fi
-warn "ProxmoxMCP: fill in token at $PMCP_DIR/proxmox-config/config.json"
+warn "ProxmoxMCP: If you haven't already, fill in token at $PMCP_DIR/proxmox-config/config.json"
 
 # ── 9. AGENT INSTRUCTIONS ────────────────────────────────────────────────────
 step "Agent instructions"
