@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=45
+REVISION=46
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -508,6 +508,6 @@ echo -e "${GREEN}  ╚═══════════════════�
 echo ""
 echo -e "  ${DIM}Log:${NC} $LOGFILE"
 echo ""
-info "Reopen shell to activate bash config"
-info "If you haven't already, fill in PROXMOX_TOKEN_VALUE at $PMCP_DIR/proxmox-config/config.json"
-info "Run 'tailscale up' to connect to your tailnet"
+warn "Reopen shell to activate bash config"
+warn "If you haven't already, fill in PROXMOX_TOKEN_VALUE at $PMCP_DIR/proxmox-config/config.json"
+warn "Run 'tailscale up' to connect to your tailnet"
