@@ -170,8 +170,19 @@ info "skill-manager (skm) installed"
 
 # ── 6. COPILOT CLI ────────────────────────────────────────────────────────────
 step "GitHub Copilot CLI"
-q gh extension install github/gh-copilot --force
-info "GitHub Copilot CLI installed"
+COPILOT_EXT="$HOME/.local/share/gh/extensions/gh-copilot"
+if [[ ! -x "$COPILOT_EXT/gh-copilot" ]]; then
+    mkdir -p "$COPILOT_EXT"
+    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    COPILOT_URL=$(curl -fsSL "https://api.github.com/repos/github/gh-copilot/releases/latest" \
+        | grep -m1 "browser_download_url.*linux.*${ARCH}" | cut -d'"' -f4)
+    { curl -fsSL "$COPILOT_URL" -o "$COPILOT_EXT/gh-copilot" \
+        && chmod +x "$COPILOT_EXT/gh-copilot"; } >>"$LOGFILE" 2>&1 \
+        || warn "GitHub Copilot CLI install failed (non-critical)"
+    info "GitHub Copilot CLI installed"
+else
+    info "GitHub Copilot CLI already present"
+fi
 
 # ── 7. CLAUDE CODE ────────────────────────────────────────────────────────────
 step "Claude Code"
