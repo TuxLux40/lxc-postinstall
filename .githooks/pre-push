@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+RAW="https://raw.githubusercontent.com/TuxLux40/lxc-postinstall/main/lxc-postinstall.sh"
+echo "  Purging GitHub CDN cache..."
+curl -s -X PURGE "$RAW" >/dev/null || true
