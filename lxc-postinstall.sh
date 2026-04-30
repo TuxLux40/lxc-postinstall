@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
+REVISION=1
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -60,7 +61,7 @@ ver() { "$@" 2>/dev/null || echo "not installed"; }
 DISTRO="${ID:-}"
 DISTRO_VER="${PRETTY_NAME:-$ID}"
 [[ -z "$DISTRO" ]] && die "Cannot detect distro from /etc/os-release"
-info "Distro: $DISTRO"
+info "Rev: $REVISION  |  Distro: $DISTRO"
 
 pkg() {
     case "$DISTRO" in
