@@ -96,7 +96,7 @@ case "$DISTRO" in
 debian|ubuntu|linuxmint)
     pkg curl wget git micro fish htop btop net-tools dnsutils tree bat \
         unzip tar ca-certificates gnupg lsb-release build-essential procps \
-        trash-cli python3 python3-venv nodejs gh
+        trash-cli python3 python3-venv nodejs npm gh
     if ! has fastfetch; then
         { curl -sLo /tmp/ff.deb \
             https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb \
