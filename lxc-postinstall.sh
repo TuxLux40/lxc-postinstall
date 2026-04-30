@@ -174,12 +174,17 @@ COPILOT_EXT="$HOME/.local/share/gh/extensions/gh-copilot"
 if [[ ! -x "$COPILOT_EXT/gh-copilot" ]]; then
     mkdir -p "$COPILOT_EXT"
     ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-    COPILOT_URL=$(curl -fsSL "https://api.github.com/repos/github/gh-copilot/releases/latest" \
-        | grep -m1 "browser_download_url.*linux.*${ARCH}" | cut -d'"' -f4)
-    { curl -fsSL "$COPILOT_URL" -o "$COPILOT_EXT/gh-copilot" \
-        && chmod +x "$COPILOT_EXT/gh-copilot"; } >>"$LOGFILE" 2>&1 \
-        || warn "GitHub Copilot CLI install failed (non-critical)"
-    info "GitHub Copilot CLI installed"
+    COPILOT_URL=$(curl -fsSL 2>/dev/null \
+        "https://api.github.com/repos/github/gh-copilot/releases/latest" \
+        | grep -m1 "browser_download_url.*linux.*${ARCH}" | cut -d'"' -f4 || true)
+    if [[ -n "$COPILOT_URL" ]]; then
+        { curl -fsSL "$COPILOT_URL" -o "$COPILOT_EXT/gh-copilot" \
+            && chmod +x "$COPILOT_EXT/gh-copilot"; } >>"$LOGFILE" 2>&1 \
+            || warn "GitHub Copilot CLI download failed (non-critical)"
+        info "GitHub Copilot CLI installed"
+    else
+        warn "GitHub Copilot CLI: release URL not found (non-critical)"
+    fi
 else
     info "GitHub Copilot CLI already present"
 fi
