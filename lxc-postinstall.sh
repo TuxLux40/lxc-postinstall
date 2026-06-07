@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proxmox LXC post-install — run as root inside the container
-REVISION=49
+REVISION=50
 set -euo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -219,7 +219,6 @@ This is an LXC container running on Proxmox VE. Use this file for context when w
 | OS       | $DISTRO_VER             |
 | Node.js  | $NODE_VER               |
 | uv       | $UV_VER                 |
-| Claude   | $CLAUDE_VER             |
 
 ## Installed Tools
 
@@ -254,9 +253,7 @@ understand what it actually does. Do not assume from the hostname alone:
 4. \`pip list\`, \`uv pip list\` — installed packages
 5. \`crontab -l 2>/dev/null\` — scheduled jobs
 
-Based on what you find, **recommend additional tools, MCP servers, and agent skills that are
-NOT already installed** and are relevant to this container's actual workload. Do not repeat
-tools already listed in the Installed Tools table above.
+Based on what you find, **recommend additional SPECIFIC tools, MCP servers, and agent skills that are NOT already installed** and are relevant to this container's actual workload. Do not repeat tools already listed in the Installed Tools table above.
 
 Always include in any generated project context file:
 - What this container does (from your investigation, not the hostname)
